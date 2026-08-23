@@ -1,0 +1,140 @@
+#!/bin/bash
+
+# Validate a rule file against the v1 schema and the live machine.
+# Errors go to stdout prefixed "error:", warnings prefixed "warn:".
+# Exit 0 = valid (warnings allowed), 1 = invalid, 2 = usage.
+
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/omaflow-lib.sh"
+
+rule_file="${1:-}"
+[[ -n $rule_file && -f $rule_file ]] || { echo "Usage: omaflow-validate <rule.json>" >&2; exit 2; }
+
+errors=0
+err() { echo "error: $1"; errors=1; }
+warn() { echo "warn: $1"; }
+
+jq -e 'type == "object"' "$rule_file" >/dev/null 2>&1 || { err "not a JSON object"; exit 1; }
+rule=$(cat "$rule_file")
+
+check() { jq -e "$1" >/dev/null 2>&1 <<<"$rule"; }
+
+check '.schemaVersion == 1' || err "schemaVersion must be 1"
+check '.id | type == "string" and test("^[a-z0-9][a-z0-9-]{0,40}$")' || err "id must be a lowercase slug"
+check '.name | type == "string" and length > 0 and length <= 80' || err "name must be a non-empty string (max 80)"
+check '.enabled | type == "boolean"' || err "enabled must be a boolean"
+check '.trigger | type == "object"' || err "trigger must be an object"
+check '.actions | type == "array" and length > 0 and length <= 10' || err "actions must be a non-empty array (max 10)"
+check '(.conditions // []) | type == "array" and length <= 5' || err "conditions must be an array (max 5)"
+check '(.cooldownSeconds // 60) | type == "number" and . >= 0 and . <= 86400' || err "cooldownSeconds must be 0..86400"
+check '(.source // "") | type == "string"' || err "source must be a string"
+check 'keys - ["schemaVersion","id","name","enabled","trigger","conditions","actions","cooldownSeconds","source","createdBy","createdAt"] | length == 0' \
+  || err "unknown top-level field: $(jq -r 'keys - ["schemaVersion","id","name","enabled","trigger","conditions","actions","cooldownSeconds","source","createdBy","createdAt"] | join(", ")' <<<"$rule")"
+
+# ---- trigger ----------------------------------------------------------------
+trigger_type=$(jq -r '.trigger.type // ""' <<<"$rule")
+case "$trigger_type" in
+manual) ;;
+time)
+  check '.trigger.at | type == "string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' || err "time trigger needs at: \"HH:MM\""
+  check '(.trigger.days // ["mon","tue","wed","thu","fri","sat","sun"]) | type == "array" and length > 0 and all(. as $d | ["mon","tue","wed","thu","fri","sat","sun"] | index($d) != null)' \
+    || err "time trigger days must be from mon..sun"
+  ;;
+monitor-connected | monitor-disconnected)
+  check '.trigger.match | type == "object" and ((.description // .name // "") | length > 0)' \
+    || err "$trigger_type needs match.description or match.name"
+  ;;
+wifi-connected)
+  check '.trigger.match | type == "object" and (((.ssid // "") | length > 0) or .known == false)' \
+    || err "wifi-connected needs match.ssid (\"*\" for any) or match.known: false"
+  ;;
+wifi-disconnected) ;;
+power-source)
+  check '.trigger.source == "ac" or .trigger.source == "battery"' || err "power-source needs source: ac|battery"
+  ;;
+"") err "trigger.type is required" ;;
+*) err "unknown trigger type: $trigger_type" ;;
+esac
+
+# ---- conditions ---------------------------------------------------------------
+while IFS= read -r cond; do
+  ctype=$(jq -r '.type // ""' <<<"$cond")
+  case "$ctype" in
+  time-between)
+    jq -e '(.from // "") | test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' >/dev/null <<<"$cond" &&
+      jq -e '(.to // "") | test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' >/dev/null <<<"$cond" ||
+      err "time-between needs from/to as HH:MM"
+    ;;
+  weekday)
+    jq -e '(.days // []) | length > 0 and all(. as $d | ["mon","tue","wed","thu","fri","sat","sun"] | index($d) != null)' >/dev/null <<<"$cond" ||
+      err "weekday needs days from mon..sun"
+    ;;
+  on-power)
+    jq -e '.source == "ac" or .source == "battery"' >/dev/null <<<"$cond" || err "on-power needs source: ac|battery"
+    ;;
+  monitor-present)
+    jq -e '(.match.description // .match.name // "") | length > 0' >/dev/null <<<"$cond" || err "monitor-present needs match"
+    ;;
+  on-ssid)
+    jq -e '(.ssid // "") | length > 0' >/dev/null <<<"$cond" || err "on-ssid needs ssid"
+    ;;
+  *) err "unknown condition type: $ctype" ;;
+  esac
+done < <(jq -c '(.conditions // [])[]' <<<"$rule")
+
+# ---- actions ------------------------------------------------------------------
+themes_cache=""
+while IFS= read -r action; do
+  atype=$(jq -r '.type // ""' <<<"$action")
+  case "$atype" in
+  theme)
+    theme=$(jq -r '.name // ""' <<<"$action")
+    [[ -n $theme ]] || { err "theme action needs name"; continue; }
+    [[ -n $themes_cache ]] || themes_cache=$(omarchy theme list 2>/dev/null || true)
+    if [[ -n $themes_cache ]] && ! grep -qixF "$theme" <<<"$themes_cache"; then
+      err "theme not installed: $theme (omarchy theme list)"
+    fi
+    ;;
+  dnd | nightlight | stay-awake)
+    jq -e '.state == "on" or .state == "off"' >/dev/null <<<"$action" || err "$atype needs state: on|off"
+    ;;
+  launch)
+    app=$(jq -r '.app // ""' <<<"$action")
+    [[ -n $app ]] || { err "launch action needs app"; continue; }
+    found=""
+    for dir in "${XDG_DATA_HOME:-$HOME/.local/share}/applications" /usr/share/applications /usr/local/share/applications; do
+      [[ -d $dir ]] || continue
+      if compgen -G "$dir/*.desktop" >/dev/null; then
+        match=$(grep -ril "^Name=$app$" "$dir"/*.desktop 2>/dev/null | head -1 || true)
+        [[ -z $match && -f "$dir/$app.desktop" ]] && match="$dir/$app.desktop"
+        [[ -z $match ]] && match=$(find "$dir" -maxdepth 1 -iname "*$app*.desktop" 2>/dev/null | head -1 || true)
+        [[ -n $match ]] && { found=$match; break; }
+      fi
+    done
+    [[ -n $found ]] || err "no desktop entry found for app: $app"
+    if jq -e 'has("workspace")' >/dev/null <<<"$action"; then
+      jq -e '.workspace | type == "number" and . >= 1 and . <= 10' >/dev/null <<<"$action" || err "launch workspace must be 1..10"
+    fi
+    ;;
+  workspace)
+    jq -e '.number | type == "number" and . >= 1 and . <= 10' >/dev/null <<<"$action" || err "workspace needs number 1..10"
+    ;;
+  audio-output)
+    sink_match=$(jq -r '.match // ""' <<<"$action")
+    [[ -n $sink_match ]] || { err "audio-output needs match"; continue; }
+    if command -v pactl >/dev/null; then
+      if ! pactl --format=json list sinks 2>/dev/null |
+        jq -e --arg m "$sink_match" '[.[] | select((.description + " " + .name) | ascii_downcase | contains($m | ascii_downcase))] | length > 0' >/dev/null; then
+        warn "no currently connected sink matches: $sink_match (may appear later)"
+      fi
+    fi
+    ;;
+  notify)
+    jq -e '(.message // "") | length > 0' >/dev/null <<<"$action" || err "notify needs message"
+    ;;
+  "") err "action missing type" ;;
+  *) err "unknown action type: $atype" ;;
+  esac
+done < <(jq -c '.actions[]' <<<"$rule")
+
+exit "$errors"

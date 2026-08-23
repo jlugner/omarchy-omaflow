@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# The Omaflow engine tick. Every invocation:
+#   1. reads the current state of all trigger domains (monitors, wifi, power, time)
+#   2. diffs against the previously stored state
+#   3. derives events, matches enabled rules, checks conditions and cooldowns
+#   4. fires matching rules through omaflow-run
+#   5. stores the new state
+#
+# Callers (the shell service, the CLI, anything) only provide immediacy —
+# redundant invocations are no-ops because unchanged state produces no events.
+
+set -euo pipefail
+bin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$bin_dir/omaflow-lib.sh"
+omaflow_init_dirs
+
+reason="${1:-tick}"
+
+exec 9>"$OMAFLOW_STATE_DIR/.eval.lock"
+flock 9
+
+# ---- current domain state -------------------------------------------------------
+monitors=$(hyprctl monitors -j 2>/dev/null | jq -c '[.[] | {name, description}]' 2>/dev/null || echo '[]')
+
+ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -1 || true)
+
+power_dir="${OMAFLOW_POWER_DIR:-/sys/class/power_supply}"
+on_ac=true
+for supply in "$power_dir"/*/type; do
+  [[ -f $supply ]] || continue
+  if [[ $(cat "$supply") == "Mains" ]]; then
+    [[ $(cat "$(dirname "$supply")/online" 2>/dev/null || echo 1) == "1" ]] && on_ac=true || on_ac=false
+    break
+  fi
+done
+
+minute=$(date +%H:%M)
+weekday=$(date +%a | tr '[:upper:]' '[:lower:]')
+
+current=$(jq -cn --argjson monitors "$monitors" --arg ssid "$ssid" \
+  --argjson onAc "$on_ac" --arg minute "$minute" \
+  '{monitors: $monitors, ssid: $ssid, onAc: $onAc, minute: $minute}')
+
+# First run: store a baseline and fire nothing (avoid a storm at boot).
+if [[ ! -f $OMAFLOW_DOMAINS_FILE ]]; then
+  printf '%s\n' "$current" >"$OMAFLOW_DOMAINS_FILE"
+  omaflow_reindex || true
+  exit 0
+fi
+previous=$(cat "$OMAFLOW_DOMAINS_FILE")
+
+# ---- derive events ---------------------------------------------------------------
+# Each event: {type, data}
+events="[]"
+add_event() {
+  events=$(jq -c --arg t "$1" --argjson d "${2:-null}" '. + [{type: $t, data: $d}]' <<<"$events")
+}
+
+added_monitors=$(jq -cn --argjson cur "$current" --argjson prev "$previous" \
+  '[$cur.monitors[] | select(.name as $n | [$prev.monitors[].name] | index($n) == null)]')
+removed_monitors=$(jq -cn --argjson cur "$current" --argjson prev "$previous" \
+  '[$prev.monitors[] | select(.name as $n | [$cur.monitors[].name] | index($n) == null)]')
+while IFS= read -r mon; do add_event monitor-connected "$mon"; done < <(jq -c '.[]' <<<"$added_monitors")
+while IFS= read -r mon; do add_event monitor-disconnected "$mon"; done < <(jq -c '.[]' <<<"$removed_monitors")
+
+prev_ssid=$(jq -r '.ssid // ""' <<<"$previous")
+if [[ $ssid != "$prev_ssid" ]]; then
+  [[ -n $prev_ssid ]] && add_event wifi-disconnected "$(jq -cn --arg s "$prev_ssid" '{ssid: $s}')"
+  if [[ -n $ssid ]]; then
+    seen='[]'
+    [[ -f $OMAFLOW_SEEN_SSIDS_FILE ]] && seen=$(cat "$OMAFLOW_SEEN_SSIDS_FILE")
+    known=$(jq --arg s "$ssid" 'index($s) != null' <<<"$seen")
+    add_event wifi-connected "$(jq -cn --arg s "$ssid" --argjson known "$known" '{ssid: $s, known: $known}')"
+    jq -c --arg s "$ssid" '. + [$s] | unique' <<<"$seen" >"$OMAFLOW_SEEN_SSIDS_FILE.tmp"
+    mv "$OMAFLOW_SEEN_SSIDS_FILE.tmp" "$OMAFLOW_SEEN_SSIDS_FILE"
+  fi
+fi
+
+prev_ac=$(jq -r '.onAc' <<<"$previous")
+if [[ $on_ac != "$prev_ac" ]]; then
+  [[ $on_ac == true ]] && add_event power-source '{"source":"ac"}' || add_event power-source '{"source":"battery"}'
+fi
+
+prev_minute=$(jq -r '.minute // ""' <<<"$previous")
+[[ $minute != "$prev_minute" ]] && add_event time "$(jq -cn --arg m "$minute" '{at: $m}')"
+
+printf '%s\n' "$current" >"$OMAFLOW_DOMAINS_FILE"
+[[ $(jq 'length' <<<"$events") -gt 0 ]] || exit 0
+
+# ---- condition evaluation ----------------------------------------------------------
+conditions_pass() { # rule JSON -> 0/1
+  local rule="$1" cond ctype
+  while IFS= read -r cond; do
+    ctype=$(jq -r '.type' <<<"$cond")
+    case "$ctype" in
+    time-between)
+      local from to
+      from=$(jq -r '.from' <<<"$cond"); to=$(jq -r '.to' <<<"$cond")
+      if [[ $from < $to || $from == "$to" ]]; then
+        [[ $minute > $from || $minute == "$from" ]] && [[ $minute < $to || $minute == "$to" ]] || return 1
+      else
+        [[ $minute > $from || $minute == "$from" || $minute < $to || $minute == "$to" ]] || return 1
+      fi
+      ;;
+    weekday)
+      jq -e --arg d "$weekday" '.days | index($d) != null' >/dev/null <<<"$cond" || return 1
+      ;;
+    on-power)
+      local want; want=$(jq -r '.source' <<<"$cond")
+      { [[ $want == ac && $on_ac == true ]] || [[ $want == battery && $on_ac == false ]]; } || return 1
+      ;;
+    monitor-present)
+      jq -e --argjson mons "$monitors" \
+        '(.match.description // .match.name) as $m
+         | [$mons[] | select(((.description + " " + .name) | ascii_downcase) | contains($m | ascii_downcase))] | length > 0' \
+        >/dev/null <<<"$cond" || return 1
+      ;;
+    on-ssid)
+      jq -e --arg cur "$ssid" '($cur | ascii_downcase) | contains(.ssid | ascii_downcase)' >/dev/null <<<"$cond" || return 1
+      ;;
+    esac
+  done < <(jq -c '(.conditions // [])[]' <<<"$rule")
+  return 0
+}
+
+trigger_matches() { # rule JSON, event JSON -> 0/1
+  local rule="$1" event="$2"
+  jq -e --argjson e "$event" '
+    .trigger as $t
+    | ($e.type == $t.type) and (
+      if $t.type == "monitor-connected" or $t.type == "monitor-disconnected" then
+        (($t.match.description // $t.match.name) | ascii_downcase) as $m
+        | (($e.data.description // "") + " " + ($e.data.name // "") | ascii_downcase) | contains($m)
+      elif $t.type == "wifi-connected" then
+        if $t.match.known == false then $e.data.known == false
+        elif $t.match.ssid == "*" then true
+        else ($e.data.ssid | ascii_downcase) | contains($t.match.ssid | ascii_downcase) end
+      elif $t.type == "power-source" then
+        $e.data.source == $t.source
+      elif $t.type == "time" then
+        ($e.data.at == $t.at)
+      else true end)' >/dev/null <<<"$rule"
+}
+
+cooldown_ok() { # rule JSON -> 0/1
+  local rule="$1" id cooldown last
+  id=$(jq -r '.id' <<<"$rule")
+  cooldown=$(jq -r '.cooldownSeconds // 60' <<<"$rule")
+  last=$(jq -r --arg id "$id" '.[$id].lastFiredEpoch // 0' "$OMAFLOW_COOLDOWNS_FILE" 2>/dev/null || echo 0)
+  (( $(date +%s) - last >= cooldown ))
+}
+
+# ---- match and fire ---------------------------------------------------------------
+while IFS= read -r event; do
+  event_type=$(jq -r '.type' <<<"$event")
+  while IFS= read -r rule_file; do
+    rule=$(cat "$rule_file")
+    jq -e '.enabled == true' >/dev/null <<<"$rule" || continue
+    [[ $(jq -r '.trigger.type' <<<"$rule") == "$event_type" ]] || continue
+    trigger_matches "$rule" "$event" || continue
+    if [[ $event_type == time ]]; then
+      jq -e --arg d "$weekday" '(.trigger.days // ["mon","tue","wed","thu","fri","sat","sun"]) | index($d) != null' \
+        >/dev/null <<<"$rule" || continue
+    fi
+    conditions_pass "$rule" || continue
+    cooldown_ok "$rule" || continue
+    rule_id=$(jq -r '.id' <<<"$rule")
+    trigger_desc="$event_type $(jq -cr '.data // {} | to_entries | map("\(.key)=\(.value)") | join(" ")' <<<"$event")"
+    "$bin_dir/omaflow-run" "$rule_id" --trigger "$trigger_desc ($reason)" || true
+  done < <(find "$OMAFLOW_RULES_DIR" -maxdepth 1 -name '*.json' | sort)
+done < <(jq -c '.[]' <<<"$events")

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "jesperlugner.omaflow",
+  "name": "Omaflow",
+  "version": "0.1.0",
+  "author": "Jesper Lugner",
+  "description": "Agent-authored desktop automations you can inspect, test, and trust",
+  "kinds": [
+    "service",
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "overlay": "Omaflow.qml"
+  }
+}

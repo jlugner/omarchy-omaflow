@@ -1,0 +1,198 @@
+#!/bin/bash
+
+# Execute one rule's actions deterministically.
+#
+#   omaflow-run <rule-id> [--dry-run] [--trigger "<description>"]
+#   omaflow-run --revert <execution-id>
+#
+# Revertible action types (theme, dnd, nightlight, stay-awake, audio-output)
+# get a pre-execution snapshot; --revert restores it. On a failed action the
+# remaining actions are skipped and applied revertibles are rolled back.
+
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/omaflow-lib.sh"
+omaflow_init_dirs
+
+dry_run=false
+trigger_desc="manual"
+revert_id=""
+rule_id=""
+
+while (( $# > 0 )); do
+  case "$1" in
+  --dry-run) dry_run=true; shift ;;
+  --trigger) trigger_desc="${2:?}"; shift 2 ;;
+  --revert) revert_id="${2:?}"; shift 2 ;;
+  -*) echo "Unknown option: $1" >&2; exit 2 ;;
+  *) rule_id="$1"; shift ;;
+  esac
+done
+
+now() { date --iso-8601=seconds; }
+
+# ---- revert -------------------------------------------------------------------
+if [[ -n $revert_id ]]; then
+  snapshot_file="$OMAFLOW_SNAPSHOTS_DIR/$revert_id.json"
+  [[ -f $snapshot_file ]] || { echo "No snapshot for execution: $revert_id" >&2; exit 1; }
+  snap=$(cat "$snapshot_file")
+  restore() { # key, command...
+    local value
+    value=$(jq -r --arg k "$1" '.[$k] // ""' <<<"$snap")
+    [[ -n $value ]] || return 0
+    shift
+    "$@" "$value" >/dev/null 2>&1 || echo "revert failed for: $*" >&2
+  }
+  restore theme omarchy theme set
+  restore dnd omarchy-shell notifications setDnd
+  restore defaultSink pactl set-default-sink
+  nl=$(jq -r '.nightlight // ""' <<<"$snap")
+  [[ $nl == on ]] && omarchy-shell nightlight enable >/dev/null 2>&1 || true
+  [[ $nl == off ]] && omarchy-shell nightlight disable >/dev/null 2>&1 || true
+  sa=$(jq -r '.stayAwake // ""' <<<"$snap")
+  [[ $sa == "true" ]] && omarchy-shell idle disable >/dev/null 2>&1 || true
+  [[ $sa == "false" ]] && omarchy-shell idle enable >/dev/null 2>&1 || true
+  omaflow_log_append "$(jq -cn --arg at "$(now)" --arg execId "$revert_id" \
+    '{at: $at, kind: "revert", execId: $execId, status: "ok"}')"
+  omaflow_notify "Omaflow" "Reverted execution $revert_id"
+  exit 0
+fi
+
+# ---- run ----------------------------------------------------------------------
+[[ -n $rule_id ]] || { echo "Usage: omaflow-run <rule-id> [--dry-run] [--trigger d] | --revert <exec-id>" >&2; exit 2; }
+rule_file=$(omaflow_rule_file "$rule_id") || { echo "Invalid rule id" >&2; exit 2; }
+[[ -f $rule_file ]] || { echo "No such rule: $rule_id" >&2; exit 1; }
+rule=$(cat "$rule_file")
+exec_id="$(date +%Y%m%d-%H%M%S)-$$"
+
+if ! validation=$("$(dirname "${BASH_SOURCE[0]}")/omaflow-validate" "$rule_file" 2>&1); then
+  omaflow_log_append "$(jq -cn --arg at "$(now)" --arg ruleId "$rule_id" --arg execId "$exec_id" \
+    --arg detail "$validation" \
+    '{at: $at, kind: "run", execId: $execId, ruleId: $ruleId, status: "invalid", detail: $detail}')"
+  echo "Rule failed validation:" >&2
+  echo "$validation" >&2
+  exit 1
+fi
+
+# Snapshot current state for the revertible action types this rule uses.
+snapshot="{}"
+has_action() { jq -e --arg t "$1" '[.actions[].type] | index($t) != null' >/dev/null <<<"$rule"; }
+if ! $dry_run; then
+  snap_add() { snapshot=$(jq -c --arg k "$1" --arg v "$2" '.[$k] = $v' <<<"$snapshot"); }
+  has_action theme && snap_add theme "$(omarchy theme current 2>/dev/null || true)"
+  has_action dnd && snap_add dnd "$(omarchy-shell notifications dndState 2>/dev/null || true)"
+  has_action nightlight && snap_add nightlight "$(omarchy-shell nightlight status 2>/dev/null || true)"
+  has_action stay-awake && snap_add stayAwake "$(omarchy-shell idle status 2>/dev/null | jq -r '.stayAwake // ""' 2>/dev/null || true)"
+  has_action audio-output && snap_add defaultSink "$(pactl get-default-sink 2>/dev/null || true)"
+  printf '%s\n' "$snapshot" >"$OMAFLOW_SNAPSHOTS_DIR/$exec_id.json"
+  find "$OMAFLOW_SNAPSHOTS_DIR" -name '*.json' -mtime +14 -delete 2>/dev/null || true
+fi
+
+resolve_desktop() { # app name -> desktop id (basename without .desktop)
+  local app="$1" dir match
+  for dir in "${XDG_DATA_HOME:-$HOME/.local/share}/applications" /usr/share/applications /usr/local/share/applications; do
+    [[ -d $dir ]] || continue
+    match=$(grep -ril "^Name=$app$" "$dir"/*.desktop 2>/dev/null | head -1 || true)
+    [[ -z $match && -f "$dir/$app.desktop" ]] && match="$dir/$app.desktop"
+    [[ -z $match ]] && match=$(find "$dir" -maxdepth 1 -iname "*$app*.desktop" 2>/dev/null | head -1 || true)
+    [[ -n $match ]] && { basename "$match" .desktop; return 0; }
+  done
+  return 1
+}
+
+apply_action() { # JSON action -> 0/1, sets $detail
+  local action="$1" atype state
+  atype=$(jq -r '.type' <<<"$action")
+  detail=""
+  case "$atype" in
+  theme)
+    detail=$(jq -r '.name' <<<"$action")
+    omarchy theme set "$detail" >/dev/null 2>&1
+    ;;
+  dnd)
+    state=$(jq -r '.state' <<<"$action"); detail=$state
+    omarchy-shell notifications setDnd "$state" >/dev/null 2>&1
+    ;;
+  nightlight)
+    state=$(jq -r '.state' <<<"$action"); detail=$state
+    if [[ $state == on ]]; then omarchy-shell nightlight enable >/dev/null 2>&1
+    else omarchy-shell nightlight disable >/dev/null 2>&1; fi
+    ;;
+  stay-awake)
+    state=$(jq -r '.state' <<<"$action"); detail=$state
+    if [[ $state == on ]]; then omarchy-shell idle disable >/dev/null 2>&1
+    else omarchy-shell idle enable >/dev/null 2>&1; fi
+    ;;
+  launch)
+    local app workspace desktop_id
+    app=$(jq -r '.app' <<<"$action")
+    workspace=$(jq -r '.workspace // ""' <<<"$action")
+    desktop_id=$(resolve_desktop "$app") || { detail="no desktop entry: $app"; return 1; }
+    detail="$desktop_id"
+    [[ -n $workspace ]] && hyprctl dispatch workspace "$workspace" >/dev/null 2>&1
+    setsid gtk-launch "$desktop_id" >/dev/null 2>&1 &
+    ;;
+  workspace)
+    detail=$(jq -r '.number' <<<"$action")
+    hyprctl dispatch workspace "$detail" >/dev/null 2>&1
+    ;;
+  audio-output)
+    local sink_match sink
+    sink_match=$(jq -r '.match' <<<"$action")
+    sink=$(pactl --format=json list sinks 2>/dev/null |
+      jq -r --arg m "$sink_match" '[.[] | select((.description + " " + .name) | ascii_downcase | contains($m | ascii_downcase))][0].name // ""')
+    [[ -n $sink ]] || { detail="no sink matches: $sink_match"; return 1; }
+    detail="$sink"
+    pactl set-default-sink "$sink" >/dev/null 2>&1
+    ;;
+  notify)
+    detail=$(jq -r '.message' <<<"$action")
+    omaflow_notify "$(jq -r '.title // "Omaflow"' <<<"$action")" "$detail"
+    ;;
+  *)
+    detail="unknown action type: $atype"
+    return 1
+    ;;
+  esac
+}
+
+results="[]"
+status="ok"
+while IFS= read -r action; do
+  atype=$(jq -r '.type' <<<"$action")
+  if $dry_run; then
+    results=$(jq -c --arg t "$atype" --argjson a "$action" '. + [{type: $t, plan: $a, ok: true}]' <<<"$results")
+    continue
+  fi
+  if apply_action "$action"; then
+    results=$(jq -c --arg t "$atype" --arg d "$detail" '. + [{type: $t, detail: $d, ok: true}]' <<<"$results")
+  else
+    results=$(jq -c --arg t "$atype" --arg d "$detail" '. + [{type: $t, detail: $d, ok: false}]' <<<"$results")
+    status="failed"
+    break
+  fi
+done < <(jq -c '.actions[]' <<<"$rule")
+
+if [[ $status == failed ]]; then
+  "$0" --revert "$exec_id" >/dev/null 2>&1 || true
+  status="reverted"
+  omaflow_notify "Omaflow rule failed" "$(jq -r '.name' <<<"$rule") — rolled back"
+fi
+
+kind="run"; $dry_run && kind="dry-run"
+omaflow_log_append "$(jq -cn \
+  --arg at "$(now)" --arg kind "$kind" --arg execId "$exec_id" --arg ruleId "$rule_id" \
+  --arg ruleName "$(jq -r '.name' <<<"$rule")" --arg trigger "$trigger_desc" --arg status "$status" \
+  --argjson actions "$results" \
+  '{at: $at, kind: $kind, execId: $execId, ruleId: $ruleId, ruleName: $ruleName, trigger: $trigger, status: $status, actions: $actions}')"
+
+if ! $dry_run; then
+  cooldowns="{}"
+  [[ -f $OMAFLOW_COOLDOWNS_FILE ]] && cooldowns=$(cat "$OMAFLOW_COOLDOWNS_FILE")
+  jq -c --arg id "$rule_id" --arg at "$(now)" --argjson epoch "$(date +%s)" \
+    '.[$id] = {lastFiredAt: $at, lastFiredEpoch: $epoch}' <<<"$cooldowns" >"$OMAFLOW_COOLDOWNS_FILE.tmp"
+  mv "$OMAFLOW_COOLDOWNS_FILE.tmp" "$OMAFLOW_COOLDOWNS_FILE"
+  omaflow_reindex || true
+fi
+
+$dry_run && jq -r '.[] | "would run: \(.type) \(.plan | del(.type) | tojson)"' <<<"$results"
+[[ $status == ok ]] || exit 1

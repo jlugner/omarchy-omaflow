@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm jq git util-linux findutils
+
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check scripts
+        run: bash -n bin/omaflow bin/omaflow-author bin/omaflow-eval bin/omaflow-lib.sh bin/omaflow-run bin/omaflow-validate tests/*.sh
+
+      - name: Manifest sanity check
+        run: |
+          jq -e '
+            .schemaVersion == 1
+            and .id == "jesperlugner.omaflow"
+            and (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+            and (.entryPoints.overlay | length > 0)
+            and (.entryPoints.service | length > 0)
+          ' manifest.json
+
+      - name: Validator fixtures
+        run: tests/test-validate.sh
+
+      - name: Engine integration test
+        run: tests/test-eval.sh
+
+      - name: Authoring pipeline test
+        run: tests/test-author.sh

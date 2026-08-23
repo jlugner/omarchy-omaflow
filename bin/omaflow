@@ -1,0 +1,146 @@
+#!/bin/bash
+
+# Omaflow CLI — everything the overlay can do, scriptable.
+#
+#   omaflow                     open the inspector overlay
+#   omaflow list                list rules
+#   omaflow author "<text>" [--agent codex|claude|grok]
+#   omaflow stage <accept|reject|show>
+#   omaflow run <id> [--dry-run]
+#   omaflow enable <id> | disable <id>
+#   omaflow delete <id>
+#   omaflow revert <exec-id>
+#   omaflow log [n]
+#   omaflow validate <file|id>
+#   omaflow agent [backend]     show or set the authoring backend
+#   omaflow poke                run one engine evaluation now
+
+set -euo pipefail
+bin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$bin_dir/omaflow-lib.sh"
+omaflow_init_dirs
+
+cmd="${1:-open}"
+shift || true
+
+set_enabled() {
+  local id="$1" value="$2" file
+  file=$(omaflow_rule_file "$id") || { echo "Invalid rule id" >&2; exit 2; }
+  [[ -f $file ]] || { echo "No such rule: $id" >&2; exit 1; }
+  jq --argjson v "$value" '.enabled = $v' "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+  omaflow_reindex
+  echo "$id: enabled=$value"
+}
+
+case "$cmd" in
+open)
+  result=$(omarchy-shell shell summon jesperlugner.omaflow '{}')
+  [[ $result == ok ]] || {
+    echo "Omaflow is not available. Enable it with:" >&2
+    echo "  omarchy plugin enable jesperlugner.omaflow" >&2
+    exit 1
+  }
+  ;;
+list)
+  omaflow_reindex
+  jq -r '.rules[] | "\(if .enabled then "●" else "○" end) \(.id)  [\(.triggerSummary)] → \(.actionsSummary)\(if .lastFired != "" then "  (last: " + .lastFired + ")" else "" end)"' \
+    "$OMAFLOW_INDEX_FILE"
+  ;;
+author)
+  exec "$bin_dir/omaflow-author" "$@"
+  ;;
+stage)
+  sub="${1:-show}"
+  [[ -f $OMAFLOW_STAGING_FILE ]] || { echo "Nothing staged" >&2; exit 1; }
+  case "$sub" in
+  show)
+    jq . "$OMAFLOW_STAGING_FILE"
+    ;;
+  accept)
+    jq -e '.status == "ready"' "$OMAFLOW_STAGING_FILE" >/dev/null || { echo "Staged rule is not ready" >&2; exit 1; }
+    rule=$(jq -c '.rule' "$OMAFLOW_STAGING_FILE")
+    id=$(jq -r '.id' <<<"$rule")
+    file=$(omaflow_rule_file "$id") || { echo "Staged rule has an invalid id" >&2; exit 1; }
+    n=2
+    while [[ -f $file ]]; do
+      id="$(jq -r '.id' <<<"$rule")-$n"
+      file=$(omaflow_rule_file "$id") || { echo "Could not find a free id" >&2; exit 1; }
+      (( n++ ))
+    done
+    jq --arg id "$id" --arg at "$(date --iso-8601=seconds)" '.id = $id | .createdAt = $at' <<<"$rule" >"$file"
+    "$bin_dir/omaflow-validate" "$file" >/dev/null || { rm -f "$file"; echo "Staged rule no longer validates" >&2; exit 1; }
+    rm -f "$OMAFLOW_STAGING_FILE"
+    omaflow_reindex
+    omaflow_log_append "$(jq -cn --arg at "$(date --iso-8601=seconds)" --arg ruleId "$id" \
+      '{at: $at, kind: "created", ruleId: $ruleId, status: "ok"}')"
+    echo "Installed rule: $id"
+    ;;
+  reject)
+    rm -f "$OMAFLOW_STAGING_FILE"
+    echo "Staged rule discarded"
+    ;;
+  *)
+    echo "Usage: omaflow stage <accept|reject|show>" >&2
+    exit 2
+    ;;
+  esac
+  ;;
+run)
+  exec "$bin_dir/omaflow-run" "$@"
+  ;;
+enable)
+  set_enabled "${1:?rule id}" true
+  ;;
+disable)
+  set_enabled "${1:?rule id}" false
+  ;;
+delete)
+  id="${1:?rule id}"
+  file=$(omaflow_rule_file "$id") || { echo "Invalid rule id" >&2; exit 2; }
+  [[ -f $file ]] || { echo "No such rule: $id" >&2; exit 1; }
+  rm -f "$file"
+  omaflow_reindex
+  omaflow_log_append "$(jq -cn --arg at "$(date --iso-8601=seconds)" --arg ruleId "$id" \
+    '{at: $at, kind: "deleted", ruleId: $ruleId, status: "ok"}')"
+  echo "Deleted rule: $id"
+  ;;
+revert)
+  exec "$bin_dir/omaflow-run" --revert "${1:?execution id}"
+  ;;
+log)
+  n="${1:-15}"
+  [[ -f $OMAFLOW_LOG_FILE ]] || exit 0
+  tail -n "$n" "$OMAFLOW_LOG_FILE" |
+    jq -r '"\(.at)  \(.kind)  \(.ruleId // "-")  \(.status)\(if .trigger then "  [" + .trigger + "]" else "" end)"'
+  ;;
+validate)
+  target="${1:?file or rule id}"
+  [[ -f $target ]] || target=$(omaflow_rule_file "$target") || { echo "Invalid rule id" >&2; exit 2; }
+  exec "$bin_dir/omaflow-validate" "$target"
+  ;;
+agent)
+  if [[ $# -eq 0 ]]; then
+    echo "resolved: $(omaflow_agent || echo none)"
+    echo "omaflow config: $(jq -r '.agent // "unset"' "$OMAFLOW_CONFIG_FILE" 2>/dev/null || echo unset)"
+    echo "omarchy default: $(cat "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/defaults/agent" 2>/dev/null || echo unset)"
+  else
+    backend="$1"
+    [[ $backend =~ ^(codex|claude|grok|auto)$ ]] || { echo "Supported: codex, claude, grok, auto" >&2; exit 2; }
+    existing="{}"
+    [[ -f $OMAFLOW_CONFIG_FILE ]] && existing=$(cat "$OMAFLOW_CONFIG_FILE")
+    jq --arg a "$backend" '.agent = $a' <<<"$existing" >"$OMAFLOW_CONFIG_FILE.tmp"
+    mv "$OMAFLOW_CONFIG_FILE.tmp" "$OMAFLOW_CONFIG_FILE"
+    echo "Authoring agent set to: $backend"
+  fi
+  ;;
+poke)
+  exec "$bin_dir/omaflow-eval" cli
+  ;;
+-h | --help | help)
+  sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  ;;
+*)
+  echo "Unknown command: $cmd (see omaflow --help)" >&2
+  exit 2
+  ;;
+esac
