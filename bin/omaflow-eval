@@ -17,16 +17,40 @@ omaflow_init_dirs
 
 reason="${1:-tick}"
 
+# Non-blocking: if an evaluation is already in flight, this one is redundant —
+# the state diff is recomputed from scratch every time and the heartbeat
+# guarantees a later run, so queueing behind the lock would only pile up
+# processes behind a slow action.
 exec 9>"$OMAFLOW_STATE_DIR/.eval.lock"
-flock 9
+flock -n 9 || exit 0
+
+# ---- previous state (quarantine if corrupt) ---------------------------------------
+previous=""
+if [[ -f $OMAFLOW_DOMAINS_FILE ]]; then
+  previous=$(jq -c 'select(type == "object")' "$OMAFLOW_DOMAINS_FILE" 2>/dev/null || true)
+  if [[ -z $previous ]]; then
+    mv "$OMAFLOW_DOMAINS_FILE" "$OMAFLOW_DOMAINS_FILE.corrupt" 2>/dev/null || true
+  fi
+fi
 
 # ---- current domain state -------------------------------------------------------
-monitors=$(hyprctl monitors -j 2>/dev/null | jq -c '[.[] | {name, description}]' 2>/dev/null || echo '[]')
+# A failed probe must not fabricate events: on probe failure the domain keeps
+# its previous value, so no diff and no firing until the probe recovers.
+if monitors_raw=$(hyprctl monitors -j 2>/dev/null) &&
+  monitors=$(jq -ce '[.[] | {name, description}]' <<<"$monitors_raw" 2>/dev/null); then
+  :
+else
+  monitors=$(jq -c '.monitors // []' <<<"${previous:-{\}}")
+fi
 
-ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -1 || true)
+if wifi_raw=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null); then
+  ssid=$(sed -n 's/^yes://p' <<<"$wifi_raw" | head -1)
+else
+  ssid=$(jq -r '.ssid // ""' <<<"${previous:-{\}}")
+fi
 
 power_dir="${OMAFLOW_POWER_DIR:-/sys/class/power_supply}"
-on_ac=true
+on_ac=""
 for supply in "$power_dir"/*/type; do
   [[ -f $supply ]] || continue
   if [[ $(cat "$supply") == "Mains" ]]; then
@@ -34,21 +58,28 @@ for supply in "$power_dir"/*/type; do
     break
   fi
 done
+if [[ -z $on_ac ]]; then
+  # No mains supply readable: keep the previous belief; default AC (desktop).
+  on_ac=$(jq -r 'if (.onAc | type) == "boolean" then .onAc else true end' <<<"${previous:-{\}}")
+fi
 
 minute=$(date +%H:%M)
-weekday=$(date +%a | tr '[:upper:]' '[:lower:]')
+weekday=$(LC_ALL=C date +%a | tr '[:upper:]' '[:lower:]')
 
 current=$(jq -cn --argjson monitors "$monitors" --arg ssid "$ssid" \
   --argjson onAc "$on_ac" --arg minute "$minute" \
   '{monitors: $monitors, ssid: $ssid, onAc: $onAc, minute: $minute}')
 
 # First run: store a baseline and fire nothing (avoid a storm at boot).
-if [[ ! -f $OMAFLOW_DOMAINS_FILE ]]; then
-  printf '%s\n' "$current" >"$OMAFLOW_DOMAINS_FILE"
+if [[ -z $previous ]]; then
+  omaflow_write_json "$OMAFLOW_DOMAINS_FILE" "$current"
+  if [[ -n $ssid ]]; then
+    seen=$(jq -c 'select(type == "array")' "$OMAFLOW_SEEN_SSIDS_FILE" 2>/dev/null || echo '[]')
+    omaflow_write_json "$OMAFLOW_SEEN_SSIDS_FILE" "$(jq -c --arg s "$ssid" '. + [$s] | unique' <<<"$seen")"
+  fi
   omaflow_reindex || true
   exit 0
 fi
-previous=$(cat "$OMAFLOW_DOMAINS_FILE")
 
 # ---- derive events ---------------------------------------------------------------
 # Each event: {type, data}
@@ -68,12 +99,10 @@ prev_ssid=$(jq -r '.ssid // ""' <<<"$previous")
 if [[ $ssid != "$prev_ssid" ]]; then
   [[ -n $prev_ssid ]] && add_event wifi-disconnected "$(jq -cn --arg s "$prev_ssid" '{ssid: $s}')"
   if [[ -n $ssid ]]; then
-    seen='[]'
-    [[ -f $OMAFLOW_SEEN_SSIDS_FILE ]] && seen=$(cat "$OMAFLOW_SEEN_SSIDS_FILE")
+    seen=$(jq -c 'select(type == "array")' "$OMAFLOW_SEEN_SSIDS_FILE" 2>/dev/null || echo '[]')
     known=$(jq --arg s "$ssid" 'index($s) != null' <<<"$seen")
     add_event wifi-connected "$(jq -cn --arg s "$ssid" --argjson known "$known" '{ssid: $s, known: $known}')"
-    jq -c --arg s "$ssid" '. + [$s] | unique' <<<"$seen" >"$OMAFLOW_SEEN_SSIDS_FILE.tmp"
-    mv "$OMAFLOW_SEEN_SSIDS_FILE.tmp" "$OMAFLOW_SEEN_SSIDS_FILE"
+    omaflow_write_json "$OMAFLOW_SEEN_SSIDS_FILE" "$(jq -c --arg s "$ssid" '. + [$s] | unique' <<<"$seen")"
   fi
 fi
 
@@ -85,7 +114,7 @@ fi
 prev_minute=$(jq -r '.minute // ""' <<<"$previous")
 [[ $minute != "$prev_minute" ]] && add_event time "$(jq -cn --arg m "$minute" '{at: $m}')"
 
-printf '%s\n' "$current" >"$OMAFLOW_DOMAINS_FILE"
+omaflow_write_json "$OMAFLOW_DOMAINS_FILE" "$current"
 [[ $(jq 'length' <<<"$events") -gt 0 ]] || exit 0
 
 # ---- condition evaluation ----------------------------------------------------------

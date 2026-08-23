@@ -19,7 +19,7 @@ make_fake() {
   printf '#!/bin/bash\necho "%s $*" >>"%s"\n%s\n' "$name" "$calls" "$body" >"$fake_bin/$name"
   chmod +x "$fake_bin/$name"
 }
-make_fake hyprctl 'if [[ $1 == monitors ]]; then cat "$TEST_MONITORS"; fi'
+make_fake hyprctl 'if [[ -n ${TEST_HYPRCTL_FAIL:-} ]]; then exit 1; fi; if [[ $1 == monitors ]]; then cat "$TEST_MONITORS"; fi'
 make_fake nmcli 'if [[ $1 == -t ]]; then cat "$TEST_WIFI"; fi'
 make_fake omarchy 'if [[ $1 == theme && $2 == current ]]; then echo old-theme; elif [[ $1 == theme && $2 == list ]]; then printf "old-theme\nwork-theme\nbroken-theme\n"; fi'
 make_fake omarchy-shell 'case "$2" in dndState) echo off ;; status) echo "{\"stayAwake\":false}" ;; *) echo ok ;; esac'
@@ -72,10 +72,11 @@ EOF
 
 state="$test_root/state/omaflow"
 
-# 1. First eval stores a baseline and fires nothing.
+# 1. First eval stores a baseline, seeds the current SSID as seen, fires nothing.
 run_env "$plugin_dir/bin/omaflow-eval" test
 [[ -f $state/domains.json ]]
 [[ ! -f $state/log.jsonl ]] || ! grep -q '"kind":"run"' "$state/log.jsonl"
+run_env jq -e 'index("HomeWifi") != null' "$state/seen-ssids.json" >/dev/null
 
 # 2. A matching monitor appears: dock-setup fires, disabled-rule does not.
 echo '[{"name":"eDP-1","description":"Laptop Screen"},{"name":"DP-3","description":"Dell U3821DW"}]' >"$TEST_MONITORS"
@@ -100,6 +101,7 @@ run_env "$plugin_dir/bin/omaflow-eval" test
 grep -q 'omarchy-shell notifications setDnd on' "$calls"
 
 # 5. Failed action rolls back: theme applies, bad sink fails, theme restored.
+#    The run is honestly labelled "failed"; the rollback logs its own entry.
 cat >"$rules_dir/failing-rule.json" <<'EOF'
 {
   "schemaVersion": 1, "id": "failing-rule", "name": "Fails", "enabled": true,
@@ -112,12 +114,33 @@ EOF
 run_env "$plugin_dir/bin/omaflow-run" failing-rule --trigger test || true
 grep -q 'omarchy theme set broken-theme' "$calls"
 grep -q 'omarchy theme set old-theme' "$calls"
-run_env jq -e '.status == "reverted"' <(grep '"ruleId":"failing-rule"' "$state/log.jsonl" | grep '"kind":"run"' | tail -1) >/dev/null
+run_env jq -e '.status == "failed"' <(grep '"ruleId":"failing-rule"' "$state/log.jsonl" | grep '"kind":"run"' | tail -1) >/dev/null
+run_env jq -e '.kind == "revert" and .status == "ok"' <(grep '"kind":"revert"' "$state/log.jsonl" | tail -1) >/dev/null
 
 # 6. Dry-run: plans logged, nothing executed, no cooldown update.
 : >"$calls"
 run_env "$plugin_dir/bin/omaflow-run" dock-setup --dry-run >/dev/null
 ! grep -q 'omarchy theme set' "$calls"
 run_env jq -e '.kind == "dry-run"' <(tail -1 "$state/log.jsonl") >/dev/null
+
+# 7. A failed probe fabricates no events: hyprctl dying must not fire
+#    monitor-disconnected rules or corrupt the stored monitor state.
+cat >"$rules_dir/undock-rule.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "undock-rule", "name": "Undock", "enabled": true,
+  "trigger": {"type": "monitor-disconnected", "match": {"description": "Dell"}},
+  "actions": [{"type": "notify", "message": "undocked"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" test
+! grep -q 'omarchy-notification-send.*undocked' "$calls"
+run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null
+
+# 8. Corrupt domain state quarantines and re-baselines instead of stalling.
+echo 'not json' >"$state/domains.json"
+run_env "$plugin_dir/bin/omaflow-eval" test
+run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null
+[[ -f $state/domains.json.corrupt ]]
 
 echo "test-eval: ok"

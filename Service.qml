@@ -72,6 +72,14 @@ Item {
           root.poke("network")
       }
     }
+    onExited: networkRespawn.restart()
+  }
+
+  Timer {
+    id: networkRespawn
+    interval: 5000
+    repeat: false
+    onTriggered: networkMonitor.running = true
   }
 
   // Guaranteed heartbeat: time triggers + belt-and-braces re-diff.

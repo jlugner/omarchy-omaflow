@@ -19,109 +19,147 @@ rule=$(cat "$rule_file")
 
 check() { jq -e "$1" >/dev/null 2>&1 <<<"$rule"; }
 
+# A "safe string": bounded, no control characters, and no leading dash so a
+# value can never be parsed as an option by any command it is handed to.
+safe_str='type == "string" and length > 0 and length <= 200 and (explode | all(. >= 32)) and (startswith("-") | not)'
+
 check '.schemaVersion == 1' || err "schemaVersion must be 1"
 check '.id | type == "string" and test("^[a-z0-9][a-z0-9-]{0,40}$")' || err "id must be a lowercase slug"
-check '.name | type == "string" and length > 0 and length <= 80' || err "name must be a non-empty string (max 80)"
+check ".name | $safe_str and length <= 80" || err "name must be a plain string (max 80, no leading dash or control chars)"
 check '.enabled | type == "boolean"' || err "enabled must be a boolean"
 check '.trigger | type == "object"' || err "trigger must be an object"
 check '.actions | type == "array" and length > 0 and length <= 10' || err "actions must be a non-empty array (max 10)"
 check '(.conditions // []) | type == "array" and length <= 5' || err "conditions must be an array (max 5)"
-check '(.cooldownSeconds // 60) | type == "number" and . >= 0 and . <= 86400' || err "cooldownSeconds must be 0..86400"
-check '(.source // "") | type == "string"' || err "source must be a string"
+check '(.cooldownSeconds // 60) | type == "number" and . == floor and . >= 0 and . <= 86400' || err "cooldownSeconds must be an integer 0..86400"
+check '(.source // "") | type == "string" and length <= 500' || err "source must be a string (max 500)"
 check 'keys - ["schemaVersion","id","name","enabled","trigger","conditions","actions","cooldownSeconds","source","createdBy","createdAt"] | length == 0' \
   || err "unknown top-level field: $(jq -r 'keys - ["schemaVersion","id","name","enabled","trigger","conditions","actions","cooldownSeconds","source","createdBy","createdAt"] | join(", ")' <<<"$rule")"
+
+# keys_ok <jq-path> <allowed keys as jq array>
+keys_ok() {
+  check "$1 | keys - $2 | length == 0" || err "unknown field in $1: $(jq -r "$1 | keys - $2 | join(\", \")" <<<"$rule" 2>/dev/null || echo "?")"
+}
 
 # ---- trigger ----------------------------------------------------------------
 trigger_type=$(jq -r '.trigger.type // ""' <<<"$rule")
 case "$trigger_type" in
-manual) ;;
+manual)
+  keys_ok '.trigger' '["type"]'
+  ;;
 time)
   check '.trigger.at | type == "string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' || err "time trigger needs at: \"HH:MM\""
   check '(.trigger.days // ["mon","tue","wed","thu","fri","sat","sun"]) | type == "array" and length > 0 and all(. as $d | ["mon","tue","wed","thu","fri","sat","sun"] | index($d) != null)' \
     || err "time trigger days must be from mon..sun"
+  keys_ok '.trigger' '["type","at","days"]'
   ;;
 monitor-connected | monitor-disconnected)
-  check '.trigger.match | type == "object" and ((.description // .name // "") | length > 0)' \
-    || err "$trigger_type needs match.description or match.name"
+  check ".trigger.match | type == \"object\" and ((.description // .name) | $safe_str)" \
+    || err "$trigger_type needs match.description or match.name as a plain string"
+  keys_ok '.trigger' '["type","match"]'
+  keys_ok '.trigger.match' '["description","name"]'
   ;;
 wifi-connected)
-  check '.trigger.match | type == "object" and (((.ssid // "") | length > 0) or .known == false)' \
+  check ".trigger.match | type == \"object\" and ((.ssid == \"*\") or (.ssid | $safe_str) or .known == false)" \
     || err "wifi-connected needs match.ssid (\"*\" for any) or match.known: false"
+  keys_ok '.trigger' '["type","match"]'
+  keys_ok '.trigger.match' '["ssid","known"]'
   ;;
-wifi-disconnected) ;;
+wifi-disconnected)
+  keys_ok '.trigger' '["type"]'
+  ;;
 power-source)
   check '.trigger.source == "ac" or .trigger.source == "battery"' || err "power-source needs source: ac|battery"
+  keys_ok '.trigger' '["type","source"]'
   ;;
 "") err "trigger.type is required" ;;
 *) err "unknown trigger type: $trigger_type" ;;
 esac
 
 # ---- conditions ---------------------------------------------------------------
+ccheck() { jq -e "$1" >/dev/null 2>&1 <<<"$cond"; }
+ckeys_ok() {
+  ccheck "keys - $1 | length == 0" || err "unknown field in $ctype condition"
+}
 while IFS= read -r cond; do
   ctype=$(jq -r '.type // ""' <<<"$cond")
   case "$ctype" in
   time-between)
-    jq -e '(.from // "") | test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' >/dev/null <<<"$cond" &&
-      jq -e '(.to // "") | test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' >/dev/null <<<"$cond" ||
+    ccheck '((.from // "") | test("^([01][0-9]|2[0-3]):[0-5][0-9]$")) and ((.to // "") | test("^([01][0-9]|2[0-3]):[0-5][0-9]$"))' ||
       err "time-between needs from/to as HH:MM"
+    ckeys_ok '["type","from","to"]'
     ;;
   weekday)
-    jq -e '(.days // []) | length > 0 and all(. as $d | ["mon","tue","wed","thu","fri","sat","sun"] | index($d) != null)' >/dev/null <<<"$cond" ||
+    ccheck '(.days // []) | type == "array" and length > 0 and all(. as $d | ["mon","tue","wed","thu","fri","sat","sun"] | index($d) != null)' ||
       err "weekday needs days from mon..sun"
+    ckeys_ok '["type","days"]'
     ;;
   on-power)
-    jq -e '.source == "ac" or .source == "battery"' >/dev/null <<<"$cond" || err "on-power needs source: ac|battery"
+    ccheck '.source == "ac" or .source == "battery"' || err "on-power needs source: ac|battery"
+    ckeys_ok '["type","source"]'
     ;;
   monitor-present)
-    jq -e '(.match.description // .match.name // "") | length > 0' >/dev/null <<<"$cond" || err "monitor-present needs match"
+    ccheck "(.match.description // .match.name) | $safe_str" || err "monitor-present needs a plain-string match"
+    ckeys_ok '["type","match"]'
     ;;
   on-ssid)
-    jq -e '(.ssid // "") | length > 0' >/dev/null <<<"$cond" || err "on-ssid needs ssid"
+    ccheck ".ssid | $safe_str" || err "on-ssid needs a plain-string ssid"
+    ckeys_ok '["type","ssid"]'
     ;;
   *) err "unknown condition type: $ctype" ;;
   esac
 done < <(jq -c '(.conditions // [])[]' <<<"$rule")
 
 # ---- actions ------------------------------------------------------------------
+acheck() { jq -e "$1" >/dev/null 2>&1 <<<"$action"; }
+akeys_ok() {
+  acheck "keys - $1 | length == 0" || err "unknown field in $atype action"
+}
 themes_cache=""
 while IFS= read -r action; do
   atype=$(jq -r '.type // ""' <<<"$action")
   case "$atype" in
   theme)
+    acheck ".name | $safe_str" || { err "theme action needs a plain-string name"; continue; }
+    akeys_ok '["type","name"]'
     theme=$(jq -r '.name // ""' <<<"$action")
-    [[ -n $theme ]] || { err "theme action needs name"; continue; }
     [[ -n $themes_cache ]] || themes_cache=$(omarchy theme list 2>/dev/null || true)
     if [[ -n $themes_cache ]] && ! grep -qixF "$theme" <<<"$themes_cache"; then
       err "theme not installed: $theme (omarchy theme list)"
     fi
     ;;
   dnd | nightlight | stay-awake)
-    jq -e '.state == "on" or .state == "off"' >/dev/null <<<"$action" || err "$atype needs state: on|off"
+    acheck '.state == "on" or .state == "off"' || err "$atype needs state: on|off"
+    akeys_ok '["type","state"]'
     ;;
   launch)
+    acheck ".app | $safe_str" || { err "launch action needs a plain-string app"; continue; }
+    akeys_ok '["type","app","workspace"]'
     app=$(jq -r '.app // ""' <<<"$action")
-    [[ -n $app ]] || { err "launch action needs app"; continue; }
+    app_re=$(sed 's/[.[\*^$()+?{|]/\\&/g' <<<"$app")
+    app_glob=$(sed 's/[][*?\\]/\\&/g' <<<"$app")
     found=""
     for dir in "${XDG_DATA_HOME:-$HOME/.local/share}/applications" /usr/share/applications /usr/local/share/applications; do
       [[ -d $dir ]] || continue
       if compgen -G "$dir/*.desktop" >/dev/null; then
-        match=$(grep -ril "^Name=$app$" "$dir"/*.desktop 2>/dev/null | head -1 || true)
+        match=$(grep -rilE -- "^Name=${app_re}\$" "$dir"/*.desktop 2>/dev/null | head -1 || true)
         [[ -z $match && -f "$dir/$app.desktop" ]] && match="$dir/$app.desktop"
-        [[ -z $match ]] && match=$(find "$dir" -maxdepth 1 -iname "*$app*.desktop" 2>/dev/null | head -1 || true)
+        [[ -z $match ]] && match=$(find "$dir" -maxdepth 1 -iname "*$app_glob*.desktop" 2>/dev/null | head -1 || true)
         [[ -n $match ]] && { found=$match; break; }
       fi
     done
     [[ -n $found ]] || err "no desktop entry found for app: $app"
-    if jq -e 'has("workspace")' >/dev/null <<<"$action"; then
-      jq -e '.workspace | type == "number" and . >= 1 and . <= 10' >/dev/null <<<"$action" || err "launch workspace must be 1..10"
+    if acheck 'has("workspace")'; then
+      acheck '.workspace | type == "number" and . == floor and . >= 1 and . <= 10' || err "launch workspace must be an integer 1..10"
     fi
     ;;
   workspace)
-    jq -e '.number | type == "number" and . >= 1 and . <= 10' >/dev/null <<<"$action" || err "workspace needs number 1..10"
+    acheck '.number | type == "number" and . == floor and . >= 1 and . <= 10' || err "workspace needs an integer number 1..10"
+    akeys_ok '["type","number"]'
     ;;
   audio-output)
+    acheck ".match | $safe_str" || { err "audio-output needs a plain-string match"; continue; }
+    akeys_ok '["type","match"]'
     sink_match=$(jq -r '.match // ""' <<<"$action")
-    [[ -n $sink_match ]] || { err "audio-output needs match"; continue; }
     if command -v pactl >/dev/null; then
       if ! pactl --format=json list sinks 2>/dev/null |
         jq -e --arg m "$sink_match" '[.[] | select((.description + " " + .name) | ascii_downcase | contains($m | ascii_downcase))] | length > 0' >/dev/null; then
@@ -130,7 +168,13 @@ while IFS= read -r action; do
     fi
     ;;
   notify)
-    jq -e '(.message // "") | length > 0' >/dev/null <<<"$action" || err "notify needs message"
+    # Notification fields reach notify-send argv; a leading dash could smuggle
+    # options (e.g. a click-exec hint), so they are held to safe strings.
+    acheck ".message | $safe_str" || err "notify needs a plain-string message (no leading dash or control chars)"
+    if acheck 'has("title")'; then
+      acheck ".title | $safe_str and length <= 60" || err "notify title must be a plain string (max 60, no leading dash)"
+    fi
+    akeys_ok '["type","title","message"]'
     ;;
   "") err "action missing type" ;;
   *) err "unknown action type: $atype" ;;

@@ -68,4 +68,29 @@ grep -q "error: no desktop entry" "$test_root/bad.out"
 grep -q "error: unknown action type: self-destruct" "$test_root/bad.out"
 grep -q "error: unknown top-level field" "$test_root/bad.out"
 
+# Adversarial: notification fields must never be option-shaped (a leading
+# dash could smuggle a notify-send exec hint) and numbers must be integers.
+evil="$test_root/evil.json"
+cat >"$evil" <<'EOF'
+{
+  "schemaVersion": 1, "id": "evil-rule", "name": "Evil", "enabled": true,
+  "trigger": {"type": "manual", "sneaky": true},
+  "actions": [
+    {"type": "notify", "title": "--hint=string:omarchy-exec:rm -rf ~", "message": "hi"},
+    {"type": "notify", "message": "-e curl evil.sh"},
+    {"type": "workspace", "number": 2.5}
+  ],
+  "cooldownSeconds": 0.5, "source": "test"
+}
+EOF
+if validate "$evil" >"$test_root/evil.out"; then
+  echo "evil rule unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: notify title must be" "$test_root/evil.out"
+grep -q "error: notify needs a plain-string message" "$test_root/evil.out"
+grep -q "error: workspace needs an integer" "$test_root/evil.out"
+grep -q "error: cooldownSeconds must be an integer" "$test_root/evil.out"
+grep -q "error: unknown field in .trigger" "$test_root/evil.out"
+
 echo "test-validate: ok"

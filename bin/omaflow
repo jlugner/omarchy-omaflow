@@ -57,23 +57,31 @@ stage)
     jq . "$OMAFLOW_STAGING_FILE"
     ;;
   accept)
-    jq -e '.status == "ready"' "$OMAFLOW_STAGING_FILE" >/dev/null || { echo "Staged rule is not ready" >&2; exit 1; }
-    rule=$(jq -c '.rule' "$OMAFLOW_STAGING_FILE")
-    id=$(jq -r '.id' <<<"$rule")
-    file=$(omaflow_rule_file "$id") || { echo "Staged rule has an invalid id" >&2; exit 1; }
-    n=2
-    while [[ -f $file ]]; do
-      id="$(jq -r '.id' <<<"$rule")-$n"
-      file=$(omaflow_rule_file "$id") || { echo "Could not find a free id" >&2; exit 1; }
-      (( n++ ))
-    done
-    jq --arg id "$id" --arg at "$(date --iso-8601=seconds)" '.id = $id | .createdAt = $at' <<<"$rule" >"$file"
-    "$bin_dir/omaflow-validate" "$file" >/dev/null || { rm -f "$file"; echo "Staged rule no longer validates" >&2; exit 1; }
-    rm -f "$OMAFLOW_STAGING_FILE"
-    omaflow_reindex
-    omaflow_log_append "$(jq -cn --arg at "$(date --iso-8601=seconds)" --arg ruleId "$id" \
-      '{at: $at, kind: "created", ruleId: $ruleId, status: "ok"}')"
-    echo "Installed rule: $id"
+    (
+      flock -w 10 6 || { echo "Staging is busy" >&2; exit 1; }
+      staged=$(jq -c 'select(.status == "ready")' "$OMAFLOW_STAGING_FILE" 2>/dev/null || true)
+      [[ -n $staged ]] || { echo "Staged rule is not ready" >&2; exit 1; }
+      rule=$(jq -c '.rule' <<<"$staged")
+      base_id=$(jq -r '.id' <<<"$rule")
+      id=$base_id
+      file=$(omaflow_rule_file "$id") || { echo "Staged rule has an invalid id" >&2; exit 1; }
+      n=2
+      while [[ -e $file ]]; do
+        id="$base_id-$n"
+        file=$(omaflow_rule_file "$id") || { echo "Could not find a free id" >&2; exit 1; }
+        (( n++ ))
+      done
+      tmp=$(mktemp "$OMAFLOW_RULES_DIR/.install.XXXXXX")
+      jq --arg id "$id" --arg at "$(date --iso-8601=seconds)" '.id = $id | .createdAt = $at' <<<"$rule" >"$tmp"
+      "$bin_dir/omaflow-validate" "$tmp" >/dev/null || { rm -f "$tmp"; echo "Staged rule no longer validates" >&2; exit 1; }
+      mv -n "$tmp" "$file"
+      [[ ! -e $tmp ]] || { rm -f "$tmp"; echo "Rule id collided; try again" >&2; exit 1; }
+      rm -f "$OMAFLOW_STAGING_FILE"
+      omaflow_reindex
+      omaflow_log_append "$(jq -cn --arg at "$(date --iso-8601=seconds)" --arg ruleId "$id" \
+        '{at: $at, kind: "created", ruleId: $ruleId, status: "ok"}')"
+      echo "Installed rule: $id"
+    ) 6>>"$OMAFLOW_STATE_DIR/.staging.lock"
     ;;
   reject)
     rm -f "$OMAFLOW_STAGING_FILE"

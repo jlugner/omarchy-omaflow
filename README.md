@@ -75,7 +75,7 @@ There is deliberately **no shell action**: the agent can only emit typed, allowl
 - Authoring (`bin/omaflow-author`) hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps), validates the result, retries once with the validator's errors on failure, and stages it — `stage accept` is the only path into the rules directory.
 - Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > **Omarchy's default agent** (`omarchy-default-agent`) > first installed of codex/claude/grok.
 
-Nothing leaves your machine at trigger time. Authoring sends your description and the inventory lists above to your chosen agent, only when you ask.
+Nothing leaves your machine at trigger time. Authoring sends your description and the inventory lists above to your chosen agent, only when you ask — with the agent's tools, MCP servers, and web access disabled as far as each CLI allows (`codex --sandbox read-only`, `claude --strict-mcp-config --disallowedTools …`, `grok --tools "" --disable-web-search`) and a hard timeout. The validator additionally rejects option-shaped strings (leading dashes, control characters) in every field that reaches a command line, so a prompt-injected rule can't smuggle flags — for example into notification exec hints.
 
 ## Verify
 

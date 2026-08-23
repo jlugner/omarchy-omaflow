@@ -26,13 +26,25 @@ omaflow_notify() {
 }
 
 # Append one JSON object (arg 1) to the execution log, newest last.
+# Serialized so concurrent writers can't interleave with pruning.
 omaflow_log_append() {
   omaflow_init_dirs
-  printf '%s\n' "$1" >>"$OMAFLOW_LOG_FILE"
-  # Keep the log bounded.
-  if (( $(wc -l <"$OMAFLOW_LOG_FILE") > 500 )); then
-    tail -n 400 "$OMAFLOW_LOG_FILE" >"$OMAFLOW_LOG_FILE.tmp" && mv "$OMAFLOW_LOG_FILE.tmp" "$OMAFLOW_LOG_FILE"
-  fi
+  (
+    flock 7
+    printf '%s\n' "$1" >>"$OMAFLOW_LOG_FILE"
+    if (( $(wc -l <"$OMAFLOW_LOG_FILE") > 500 )); then
+      local tmp
+      tmp=$(mktemp "$OMAFLOW_STATE_DIR/.log.XXXXXX")
+      tail -n 400 "$OMAFLOW_LOG_FILE" >"$tmp" && mv "$tmp" "$OMAFLOW_LOG_FILE"
+    fi
+  ) 7>>"$OMAFLOW_STATE_DIR/.log.lock"
+}
+
+# Atomic JSON state write: omaflow_write_json <path> <content>
+omaflow_write_json() {
+  local tmp
+  tmp=$(mktemp "$OMAFLOW_STATE_DIR/.write.XXXXXX")
+  printf '%s\n' "$2" >"$tmp" && mv "$tmp" "$1"
 }
 
 # Human-readable one-line summaries for the overlay, built from a rule file.
@@ -98,29 +110,42 @@ omaflow_agent() {
   return 1
 }
 
-# Run one single-turn, read-only prompt on the chosen backend. stdout: answer.
+# Run one single-turn prompt on the chosen backend. stdout: answer (capped).
+# Tools, MCP servers, and web access are disabled as far as each CLI allows —
+# the task is pure text translation and must stay side-effect free even under
+# prompt injection. A wall-clock timeout bounds hung backends.
 omaflow_agent_run() {
-  local backend="$1" task="$2" out
+  local backend="$1" task="$2" out rc=0
+  local budget="${OMAFLOW_AGENT_TIMEOUT:-180}"
   case "$backend" in
   codex)
-    out=$(mktemp)
-    if codex exec \
+    out=$(mktemp "$OMAFLOW_STATE_DIR/.agent.XXXXXX")
+    if timeout "$budget" codex exec \
       --skip-git-repo-check \
       --sandbox read-only \
       --config 'notify=[]' \
       --config 'model_reasoning_effort="low"' \
       --output-last-message "$out" \
       "$task" >/dev/null 2>&1; then
-      cat "$out"; rm -f "$out"
+      head -c 65536 "$out"
     else
-      rm -f "$out"; return 1
+      rc=1
     fi
+    rm -f "$out"
+    return "$rc"
     ;;
   claude)
-    claude -p "$task" --output-format text 2>/dev/null
+    out=$(timeout "$budget" claude -p "$task" --output-format text \
+      --strict-mcp-config \
+      --disallowedTools "Bash" "Edit" "Write" "NotebookEdit" "Read" "Glob" "Grep" "Task" "WebFetch" "WebSearch" "TodoWrite" \
+      2>/dev/null) || return 1
+    head -c 65536 <<<"$out"
     ;;
   grok)
-    grok -p "$task" --output-format plain 2>/dev/null
+    out=$(timeout "$budget" grok -p "$task" --output-format plain \
+      --tools "" --disable-web-search \
+      2>/dev/null) || return 1
+    head -c 65536 <<<"$out"
     ;;
   *)
     echo "Unknown agent backend: $backend" >&2

@@ -26,15 +26,16 @@ done
 [[ -n ${request//[[:space:]]/} ]] || { echo "Usage: omaflow-author \"<description>\" [--agent codex|claude|grok]" >&2; exit 2; }
 
 write_staging() { # status [rule-json warnings-json | error-message]
-  local status="$1" rule="${2:-null}" warnings="${3:-[]}" error="${4:-}"
+  local status="$1" rule="${2:-null}" warnings="${3:-[]}" error="${4:-}" tmp
+  tmp=$(mktemp "$OMAFLOW_STATE_DIR/.staging.XXXXXX")
   jq -cn --arg status "$status" --arg agent "${agent:-}" --arg request "$request" \
     --arg at "$(date --iso-8601=seconds)" --arg error "$error" \
     --argjson rule "$rule" --argjson warnings "$warnings" \
     '{status: $status, agent: $agent, request: $request, updatedAt: $at}
       + (if $rule != null then {rule: $rule, warnings: $warnings} else {} end)
       + (if $error != "" then {error: $error} else {} end)' \
-    >"$OMAFLOW_STAGING_FILE.tmp"
-  mv "$OMAFLOW_STAGING_FILE.tmp" "$OMAFLOW_STAGING_FILE"
+    >"$tmp"
+  mv "$tmp" "$OMAFLOW_STAGING_FILE"
 }
 
 fail() {
@@ -111,7 +112,8 @@ for attempt in 1 2; do
   rule_json=$(jq -c --arg source "$request" --arg agent "$agent" \
     '.schemaVersion = 1 | .source = $source | .createdBy = $agent | .enabled = true' <<<"$rule_json" 2>/dev/null) ||
     { attempt_errors="error: output was not valid JSON"; continue; }
-  staged_rule="$OMAFLOW_STATE_DIR/staged-rule.json"
+  staged_rule=$(mktemp "$OMAFLOW_STATE_DIR/.staged-rule.XXXXXX")
+  trap 'rm -f "$staged_rule"' EXIT
   printf '%s\n' "$rule_json" >"$staged_rule"
   if validation=$("$bin_dir/omaflow-validate" "$staged_rule"); then
     warnings=$(grep '^warn:' <<<"$validation" || true)

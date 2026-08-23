@@ -174,10 +174,13 @@ Item {
       if (action.app) atext += " → " + action.app + (action.workspace ? " (workspace " + action.workspace + ")" : "")
       if (action.number) atext += " → " + action.number
       if (action.match) atext += " → " + action.match
-      if (action.message) atext += " → \"" + action.message + "\""
+      if (action.title) atext += " → [" + action.title + "]"
+      if (action.message) atext += " \"" + action.message + "\""
       lines.push((a === 0 ? "Do     " : "       ") + atext)
     }
-    lines.push("Cooldown  " + String(rule.cooldownSeconds || 60) + "s")
+    var cooldown = (rule.cooldownSeconds === undefined || rule.cooldownSeconds === null)
+      ? 60 : rule.cooldownSeconds
+    lines.push("Cooldown  " + cooldown + "s")
     return lines
   }
 
@@ -317,7 +320,13 @@ Item {
           anchors.fill: parent
           color: root.scrim
 
-          MouseArea { anchors.fill: parent; onClicked: root.cli(["stage", "reject"]) }
+          MouseArea {
+            anchors.fill: parent
+            onClicked: {
+              root.cli(["stage", "reject"])
+              root.staging = null
+            }
+          }
         }
 
         BorderSurface {
@@ -499,9 +508,11 @@ Item {
               if (root.previewOpen) {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                   root.cli(["stage", "accept"])
+                  root.staging = null // optimistic: block repeated accepts until the file updates
                   event.accepted = true
                 } else if (event.key === Qt.Key_Escape) {
                   root.cli(["stage", "reject"])
+                  root.staging = null
                   event.accepted = true
                 }
                 return
