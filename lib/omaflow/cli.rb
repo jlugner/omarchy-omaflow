@@ -463,7 +463,7 @@ module Omaflow
       end
       argv.each_with_object({}) do |pair, data|
         key, value = pair.split('=', 2)
-        unless safe_event_string?(key) && safe_event_string?(value) && !data.key?(key)
+        unless safe_event_string?(key) && safe_event_string?(value) && !%w[name at trigger].include?(key) && !data.key?(key)
           warn 'Custom event data must be unique plain key=value strings'
           return nil
         end

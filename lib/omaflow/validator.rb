@@ -80,6 +80,15 @@ module Omaflow
         value.codepoints.all? { it >= 32 } && !value.start_with?('-')
     end
 
+    def present_str?(value, max: 200) = safe_str?(value, max:) && !value.strip.empty?
+
+    def present_match?(match, fields)
+      return false unless match.is_a?(Hash)
+
+      values = fields.select { match.key?(it) }.map { match[it] }
+      !values.empty? && values.all? { present_str?(it) }
+    end
+
     def integer_between?(value, range) = value.is_a?(Integer) && range.cover?(value)
 
     def unknown_keys(object, allowed, label)
@@ -138,16 +147,16 @@ module Omaflow
 
     def check_monitor_trigger(trigger)
       match = trigger['match']
-      target = match.is_a?(Hash) ? match['description'] || match['name'] : nil
-      err("#{trigger['type']} needs match.description or match.name as a plain string") unless safe_str?(target)
+      valid = present_match?(match, %w[description name])
+      err("#{trigger['type']} needs match.description or match.name as a plain string") unless valid
       unknown_keys(trigger, %w[type match], '.trigger')
       unknown_keys(match, %w[description name], '.trigger.match') if match.is_a?(Hash)
     end
 
     def check_app_trigger(trigger)
       match = trigger['match']
-      target = match.is_a?(Hash) ? match['class'] || match['title'] : nil
-      err("#{trigger['type']} needs match.class or match.title as a plain string") unless safe_str?(target)
+      valid = present_match?(match, %w[class title])
+      err("#{trigger['type']} needs match.class or match.title as a plain string") unless valid
       unknown_keys(trigger, %w[type match], '.trigger')
       unknown_keys(match, %w[class title], '.trigger.match') if match.is_a?(Hash)
     end
@@ -223,22 +232,20 @@ module Omaflow
 
     def check_monitor_present(condition)
       match = condition['match']
-      target = match.is_a?(Hash) ? match['description'] || match['name'] : nil
-      err('monitor-present needs a plain-string match') unless safe_str?(target)
+      err('monitor-present needs a plain-string match') unless present_match?(match, %w[description name])
       unknown_keys(condition, %w[type match], 'monitor-present condition')
       unknown_keys(match, %w[description name], 'monitor-present condition match') if match.is_a?(Hash)
     end
 
     def check_app_running(condition)
       match = condition['match']
-      target = match.is_a?(Hash) ? match['class'] || match['title'] : nil
-      err('app-running needs match.class or match.title as a plain string') unless safe_str?(target)
+      err('app-running needs match.class or match.title as a plain string') unless present_match?(match, %w[class title])
       unknown_keys(condition, %w[type match], 'app-running condition')
       unknown_keys(match, %w[class title], 'app-running condition match') if match.is_a?(Hash)
     end
 
     def check_on_ssid(condition)
-      err('on-ssid needs a plain-string ssid') unless safe_str?(condition['ssid'])
+      err('on-ssid needs a plain-string ssid') unless present_str?(condition['ssid'])
       unknown_keys(condition, %w[type ssid], 'on-ssid condition')
     end
 

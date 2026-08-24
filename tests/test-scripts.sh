@@ -4,7 +4,7 @@ set -euo pipefail
 trap 'echo "$0: FAILED at line $LINENO" >&2' ERR
 
 plugin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-test_root=$(mktemp -d)
+test_root=$(mktemp -d "$plugin_dir/.test-scripts.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT
 
 fake_bin="$test_root/bin"
@@ -91,6 +91,15 @@ if run_env "$plugin_dir/bin/omaflow" scripts add unsafe-parent "$unsafe_dir/hard
   exit 1
 fi
 grep -q 'chmod go-w' "$test_root/unsafe-parent.out"
+unsafe_ancestor="$test_root/unsafe-ancestor"
+mkdir -p "$unsafe_ancestor/safe-child"
+cp "$approved" "$unsafe_ancestor/safe-child/script"
+chmod 700 "$unsafe_ancestor/safe-child" "$unsafe_ancestor/safe-child/script"
+chmod 775 "$unsafe_ancestor"
+if run_env "$plugin_dir/bin/omaflow" scripts add unsafe-ancestor "$unsafe_ancestor/safe-child/script" 2>/dev/null; then
+  echo "script below a writable ancestor unexpectedly allowed" >&2
+  exit 1
+fi
 if run_env "$plugin_dir/bin/omaflow" scripts add relative refresh-desk 2>/dev/null; then
   echo "relative script path unexpectedly allowed" >&2
   exit 1
@@ -130,9 +139,10 @@ run_env env OMAFLOW_LOCK_INCOMPATIBLE=1 /usr/bin/ruby -r "$plugin_dir/lib/omaflo
 '
 
 group_plugin="$test_root/group-plugin"
-cp -a "$plugin_dir" "$group_plugin"
+mkdir "$group_plugin"
+cp -a "$plugin_dir/bin" "$plugin_dir/lib" "$plugin_dir/scripts" "$group_plugin/"
 chmod 775 "$group_plugin/scripts" "$group_plugin/scripts/lock-fingerprint-enable" "$group_plugin/scripts/lock-fingerprint-disable"
-run_env "$group_plugin/bin/omaflow" scripts list | grep -q '^✓ lock-fingerprint-enable'
+run_env "$group_plugin/bin/omaflow" scripts list | grep -q '^! lock-fingerprint-enable'
 
 echo 'not json' >"$scripts_file"
 if run_env "$plugin_dir/bin/omaflow" scripts add another "$approved" 2>/dev/null; then

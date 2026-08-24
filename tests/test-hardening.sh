@@ -33,15 +33,17 @@ run_ruby '
 # skipped, listing survives, and load_json! raises instead of parsing.
 /usr/bin/ruby -e 'print "{\"id\":\"huge\",", "\"x\":\"" + ("a" * 300_000) + "\"}"' >"$rules_dir/huge.json"
 ln -s /etc/hostname "$rules_dir/sneaky.json"
+mkfifo "$rules_dir/pipe.json"
 cat >"$rules_dir/tiny.json" <<'EOF'
 {"schemaVersion":1,"id":"tiny","name":"Tiny","enabled":false,"trigger":{"type":"manual"},
  "actions":[{"type":"notify","message":"hi"}],"source":"test"}
 EOF
 listing=$(HOME="$test_root" XDG_CONFIG_HOME="$test_root/config" XDG_STATE_HOME="$test_root/state" \
-  PATH="$test_root/bin:/usr/bin:/bin" "$plugin_dir/bin/omaflow" list)
+  PATH="$test_root/bin:/usr/bin:/bin" timeout 10 "$plugin_dir/bin/omaflow" list)
 grep -q '○ tiny' <<<"$listing"
 ! grep -q 'huge' <<<"$listing"
 ! grep -q 'sneaky' <<<"$listing"
+! grep -q 'pipe' <<<"$listing"
 run_ruby '
   begin
     Omaflow::Store.load_json!(File.join(Omaflow::Paths.rules_dir, "sneaky.json"), {})
@@ -54,6 +56,28 @@ run_ruby '
 run_ruby '
   abort "rule cap missing" unless Omaflow::Store::MAX_RULE_FILES == 200
   abort "json byte cap missing" unless Omaflow::Store::MAX_JSON_BYTES == 262_144
+'
+
+run_ruby '
+  205.times do |number|
+    File.write(File.join(Omaflow::Paths.rules_dir, format("cap-%03d.json", number)), JSON.generate({ "id" => number }))
+  end
+  abort "rule walk exceeded cap" unless Omaflow::Store.rules.size <= Omaflow::Store::MAX_RULE_FILES
+  Dir.each_child(Omaflow::Paths.rules_dir) { File.delete(File.join(Omaflow::Paths.rules_dir, it)) if it.start_with?("cap-") }
+'
+
+run_ruby '
+  Omaflow::Paths.ensure_dirs
+  old = Time.now - (15 * 86_400)
+  205.times do |number|
+    path = File.join(Omaflow::Paths.snapshots_dir, format("cap-%03d.json", number))
+    File.write(path, "{}")
+    File.utime(old, old, path)
+  end
+  Omaflow::Executor.new.send(:prune_snapshots)
+  remaining = Dir.each_child(Omaflow::Paths.snapshots_dir).count { it.start_with?("cap-") }
+  abort "snapshot walk exceeded cap" unless remaining >= 5
+  Dir.each_child(Omaflow::Paths.snapshots_dir) { File.delete(File.join(Omaflow::Paths.snapshots_dir, it)) if it.start_with?("cap-") }
 '
 
 

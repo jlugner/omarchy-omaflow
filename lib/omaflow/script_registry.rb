@@ -55,7 +55,7 @@ module Omaflow
       value = entry(name)
       return nil unless value
 
-      path = canonical_path(value['path'], allow_group_write: built_in?(name))
+      path = canonical_path(value['path'])
       return nil unless path && path == value['path']
 
       value.merge('path' => path)
@@ -72,21 +72,26 @@ module Omaflow
       nil
     end
 
-    def canonical_path(path, allow_group_write: false)
+    def canonical_path(path)
       resolved = File.realpath(path.to_s)
-      stat = File.stat(resolved)
-      parent = File.stat(File.dirname(resolved))
-      safe_file = safe_stat?(stat, allow_group_write:)
-      safe_parent = safe_stat?(parent, allow_group_write:)
-      resolved if resolved.start_with?('/') && stat.file? && File.executable?(resolved) && safe_file && safe_parent
+      stat = File.lstat(resolved)
+      return nil unless resolved.start_with?('/') && stat.file? && File.executable?(resolved) && safe_stat?(stat)
+
+      directory = File.dirname(resolved)
+      loop do
+        return nil unless safe_stat?(File.lstat(directory))
+        break if directory == '/'
+
+        directory = File.dirname(directory)
+      end
+      resolved
     rescue SystemCallError
       nil
     end
 
-    def safe_stat?(stat, allow_group_write:)
-      trusted_owner = stat.uid.zero? || stat.uid == Process.uid
-      unsafe_mode = allow_group_write ? 0o002 : 0o022
-      trusted_owner && stat.mode.nobits?(unsafe_mode)
+    def safe_stat?(stat)
+      trusted_owner = stat.uid.zero? || stat.uid == Process.uid || stat.uid == File.lstat('/').uid
+      trusted_owner && stat.mode.nobits?(0o022)
     end
 
     def probe_available?(probe)

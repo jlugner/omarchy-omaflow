@@ -153,6 +153,28 @@ fi
 grep -q "error: app-opened needs match.class or match.title" "$test_root/app-missing.out"
 grep -q "error: app-running needs match.class or match.title" "$test_root/app-missing.out"
 
+blank_match="$test_root/blank-match.json"
+cat >"$blank_match" <<'EOF'
+{
+  "schemaVersion": 1, "id": "blank-match", "name": "Blank match", "enabled": true,
+  "trigger": {"type": "app-opened", "match": {"class": " "}},
+  "conditions": [
+    {"type": "monitor-present", "match": {"name": " "}},
+    {"type": "app-running", "match": {"title": " "}},
+    {"type": "on-ssid", "ssid": " "}
+  ],
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$blank_match" >"$test_root/blank-match.out"; then
+  echo "blank match strings unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: app-opened needs match.class or match.title" "$test_root/blank-match.out"
+grep -q "error: monitor-present needs a plain-string match" "$test_root/blank-match.out"
+grep -q "error: app-running needs match.class or match.title" "$test_root/blank-match.out"
+grep -q "error: on-ssid needs a plain-string ssid" "$test_root/blank-match.out"
+
 app_unknown="$test_root/app-unknown.json"
 cat >"$app_unknown" <<'EOF'
 {

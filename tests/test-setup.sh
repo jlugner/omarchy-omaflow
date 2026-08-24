@@ -53,6 +53,25 @@ cmp "$test_root/bindings-before" "$bindings_file"
 [[ $(grep -c '// omaflow:begin' "$menu_file") == 1 ]]
 [[ $(grep -c '# omaflow:begin' "$bindings_file") == 1 ]]
 
+lua_home="$test_root/lua-home"
+lua_bindings="$lua_home/.config/hypr/bindings.lua"
+lua_conf="$lua_home/.config/hypr/bindings.conf"
+mkdir -p "$(dirname "$lua_bindings")"
+printf 'o.bind("SUPER + RETURN", "Terminal", "foot")\n' >"$lua_bindings"
+printf 'bind = SUPER, Return, exec, foot\n' >"$lua_conf"
+cp "$lua_conf" "$test_root/lua-conf-before"
+run_cli "$lua_home" setup --yes >/dev/null
+grep -Fq -- '-- omaflow:begin' "$lua_bindings"
+grep -Fq -- '-- omaflow:end' "$lua_bindings"
+grep -Fq '  "SUPER + SHIFT + U",' "$lua_bindings"
+grep -Fq '  "Automations (Omaflow)",' "$lua_bindings"
+grep -Fq '  "$HOME/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow"' "$lua_bindings"
+cmp "$test_root/lua-conf-before" "$lua_conf"
+cp "$lua_bindings" "$test_root/lua-before"
+run_cli "$lua_home" setup --yes >/dev/null
+cmp "$test_root/lua-before" "$lua_bindings"
+[[ $(grep -c -- '-- omaflow:begin' "$lua_bindings") == 1 ]]
+
 foreign_home="$test_root/foreign-home"
 mkdir -p "$foreign_home/.local/bin"
 ln -s /usr/bin/true "$foreign_home/.local/bin/omaflow"
@@ -115,6 +134,51 @@ run_cli "$comma_home" setup --yes >/dev/null
   abort "existing entry lost" unless parsed.key?("existing")
 ' "$comma_menu"
 
+marker_text_home="$test_root/marker-text-home"
+marker_text_menu="$marker_text_home/.config/omarchy/extensions/omarchy-menu.jsonc"
+mkdir -p "$(dirname "$marker_text_menu")"
+cat >"$marker_text_menu" <<'JSONC'
+{
+  "note": "// omaflow:begin"
+}
+JSONC
+run_cli "$marker_text_home" setup --yes >/dev/null
+/usr/bin/ruby -r json -e '
+  stripped = File.read(ARGV[0]).gsub(%r{^\s*//[^\n]*(\n|$)}, "").gsub(/,(\s*[}\]])/, "\\1")
+  parsed = JSON.parse(stripped)
+  abort "marker-like string changed" unless parsed["note"] == "// omaflow:begin"
+  abort "menu block missing" unless parsed.key?("automations")
+' "$marker_text_menu"
+
+comment_brace_home="$test_root/comment-brace-home"
+comment_brace_menu="$comment_brace_home/.config/omarchy/extensions/omarchy-menu.jsonc"
+mkdir -p "$(dirname "$comment_brace_menu")"
+cat >"$comment_brace_menu" <<'JSONC'
+{
+  "existing": {"label": "Keep"}
+}
+// trailing comment }
+JSONC
+run_cli "$comment_brace_home" setup --yes >/dev/null
+/usr/bin/ruby -r json -e '
+  stripped = File.read(ARGV[0]).gsub(%r{^\s*//[^\n]*(\n|$)}, "").gsub(/,(\s*[}\]])/, "\\1")
+  parsed = JSON.parse(stripped)
+  abort "menu block missing" unless parsed.key?("automations")
+  abort "existing entry lost" unless parsed.key?("existing")
+' "$comment_brace_menu"
+
+invalid_home="$test_root/invalid-home"
+invalid_menu="$invalid_home/.config/omarchy/extensions/omarchy-menu.jsonc"
+mkdir -p "$(dirname "$invalid_menu")"
+printf '{\n  "broken":\n}\n' >"$invalid_menu"
+cp "$invalid_menu" "$test_root/invalid-original"
+if run_cli "$invalid_home" setup --yes >"$test_root/invalid.out" 2>&1; then
+  echo 'invalid menu was accepted' >&2
+  exit 1
+fi
+grep -q 'needs manual attention' "$test_root/invalid.out"
+cmp "$test_root/invalid-original" "$invalid_menu"
+
 lone_home="$test_root/lone-home"
 lone_menu="$lone_home/.config/omarchy/extensions/omarchy-menu.jsonc"
 mkdir -p "$(dirname "$lone_menu")"
@@ -133,6 +197,7 @@ if run_cli "$non_tty_home" setup </dev/null >"$test_root/non-tty.out" 2>&1; then
   exit 1
 fi
 grep -q 'complete these steps manually' "$test_root/non-tty.out"
+grep -Fq 'o.bind(' "$test_root/non-tty.out"
 
 first_run_home="$test_root/first-run-home"
 notify_log="$test_root/notify.log"

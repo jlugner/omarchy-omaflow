@@ -26,6 +26,7 @@ module Omaflow
       'stay-awake' => :snapshot_stay_awake,
       'audio-output' => :snapshot_audio_output
     }.freeze
+    SNAPSHOT_FILE_LIMIT = 200
 
     def self.run(rule_id, dry_run: false, trigger: 'manual', trigger_data: {}, respect_cooldown: false)
       locked = Store.with_lock('.run.lock') { return new.execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:) }
@@ -141,7 +142,15 @@ module Omaflow
 
     def prune_snapshots
       cutoff = Time.now - (14 * 86_400)
-      Dir.glob(File.join(Paths.snapshots_dir, '*.json')).each do |path|
+      names = []
+      Dir.each_child(Paths.snapshots_dir) do |name|
+        next unless name.end_with?('.json')
+
+        names << name
+        break if names.size >= SNAPSHOT_FILE_LIMIT
+      end
+      names.each do |name|
+        path = File.join(Paths.snapshots_dir, name)
         File.delete(path) if File.mtime(path) < cutoff
       rescue StandardError
         nil

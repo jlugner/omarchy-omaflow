@@ -10,7 +10,7 @@ module Omaflow
     MAX_RULE_FILES = 200
 
     def safe_read(path, max_bytes: MAX_JSON_BYTES)
-      File.open(path, File::RDONLY | File::NOFOLLOW) do |file|
+      File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
         stat = file.stat
         raise IOError, "not a regular file: #{path}" unless stat.file?
         raise IOError, "file exceeds #{max_bytes} bytes: #{path}" if stat.size > max_bytes
@@ -104,7 +104,15 @@ module Omaflow
     end
 
     def rules
-      Dir.glob(File.join(Paths.rules_dir, '*.json')).first(MAX_RULE_FILES).filter_map do |path|
+      names = []
+      Dir.each_child(Paths.rules_dir) do |name|
+        next unless name.end_with?('.json')
+
+        names << name
+        break if names.size >= MAX_RULE_FILES
+      end
+      names.sort.filter_map do |name|
+        path = File.join(Paths.rules_dir, name)
         rule = read_json(path, {})
         rule.empty? ? nil : rule
       end

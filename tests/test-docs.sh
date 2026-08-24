@@ -61,6 +61,11 @@ fi
   (vocab::ACTIONS + vocab::TRIGGERS + vocab::CONDITIONS).each do |type|
     abort "#{type} missing from the authoring schema doc" unless doc.include?("\"type\":\"#{type}\"")
   end
+  abort "monitor-disconnected match.name missing" unless
+    doc.include?(%({"type":"monitor-disconnected","match":{"description":"<substring>"}} (or match.name)))
+  abort "monitor-present match.name missing" unless
+    doc.include?(%({"type":"monitor-present","match":{"description":"<substring>"}} (or match.name)))
+  abort "custom event timestamp missing" unless doc.include?("{{at}} is the envelope timestamp")
 '
 
 grep -q 'gdbus.*org.freedesktop.UPower' "$plugin_dir/Service.qml"

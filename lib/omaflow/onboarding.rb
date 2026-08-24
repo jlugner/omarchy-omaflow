@@ -9,6 +9,8 @@ module Omaflow
     MENU_END = '// omaflow:end'
     BINDINGS_BEGIN = '# omaflow:begin'
     BINDINGS_END = '# omaflow:end'
+    LUA_BINDINGS_BEGIN = '-- omaflow:begin'
+    LUA_BINDINGS_END = '-- omaflow:end'
     MENU_BLOCK = <<~BLOCK.lines.map { "  #{it}" }.join.chomp.freeze
       // omaflow:begin
       "automations": {"icon": "󱐋", "label": "Automations", "action": "$HOME/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow", "description": "Omaflow rules and authoring"},
@@ -18,6 +20,15 @@ module Omaflow
       # omaflow:begin
       bindd = SUPER SHIFT, U, Toggle Omaflow, exec, omarchy-shell shell toggle jesperlugner.omaflow
       # omaflow:end
+    BLOCK
+    LUA_BINDINGS_BLOCK = <<~BLOCK.chomp.freeze
+      -- omaflow:begin
+      o.bind(
+        "SUPER + SHIFT + U",
+        "Automations (Omaflow)",
+        "$HOME/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow"
+      )
+      -- omaflow:end
     BLOCK
 
     class SetupError < StandardError; end
@@ -105,21 +116,44 @@ module Omaflow
         write_atomic(menu_file, updated, mode: File.stat(menu_file).mode & 0o7777)
       else
         FileUtils.mkdir_p(File.dirname(menu_file))
-        write_atomic(menu_file, "{\n#{MENU_BLOCK}\n}\n", mode: 0o644)
+        write_atomic(menu_file, validate_menu("{\n#{MENU_BLOCK}\n}\n"), mode: 0o644)
       end
       puts "   ✓ installed: #{menu_file}"
     end
 
     def replace_or_insert_menu(text)
       replaced = replace_marked(text, block: MENU_BLOCK, begin_marker: MENU_BEGIN, end_marker: MENU_END, path: menu_file)
-      return replaced if replaced
+      updated = if replaced
+                  replaced
+                else
+                  closing = menu_closing_position(text)
+                  raise SetupError, "#{menu_file} has no final closing brace; it needs manual attention" unless closing
 
-      closing = text.rindex('}')
-      raise SetupError, "#{menu_file} has no final closing brace; it needs manual attention" unless closing
+                  prefix = with_entry_comma(text[0...closing])
+                  separator = prefix.empty? || prefix.end_with?("\n") ? '' : "\n"
+                  "#{prefix}#{separator}#{MENU_BLOCK}\n#{text[closing..]}"
+                end
+      validate_menu(updated)
+    end
 
-      prefix = with_entry_comma(text[0...closing])
-      separator = prefix.empty? || prefix.end_with?("\n") ? '' : "\n"
-      "#{prefix}#{separator}#{MENU_BLOCK}\n#{text[closing..]}"
+    def menu_closing_position(text)
+      closing = nil
+      offset = 0
+      text.each_line do |line|
+        content = line.split('//', 2).first
+        position = content.rindex('}')
+        closing = offset + position if position
+        offset += line.length
+      end
+      closing
+    end
+
+    def validate_menu(text)
+      stripped = text.gsub(%r{^\s*//[^\n]*(\n|$)}, '').gsub(/,(\s*[}\]])/, '\1')
+      JSON.parse(stripped)
+      text
+    rescue JSON::ParserError
+      raise SetupError, "#{menu_file} could not be parsed after setup; it needs manual attention"
     end
 
     def with_entry_comma(prefix)
@@ -157,11 +191,12 @@ module Omaflow
 
       path = bindings_file
       unless path
-        puts '   ! skipped: no Hyprland bindings.conf or hyprland.conf was found'
+        puts '   ! skipped: no Hyprland bindings.lua, bindings.conf, or hyprland.conf was found'
         return
       end
       text = Store.safe_read(path)
-      updated = replace_marked(text, block: BINDINGS_BLOCK, begin_marker: BINDINGS_BEGIN, end_marker: BINDINGS_END, path:)
+      block, begin_marker, end_marker = binding_format(path)
+      updated = replace_marked(text, block:, begin_marker:, end_marker:, path:)
       separator = if text.empty?
                     ''
                   elsif text.end_with?("\n")
@@ -169,7 +204,7 @@ module Omaflow
                   else
                     "\n\n"
                   end
-      updated ||= "#{text}#{separator}#{BINDINGS_BLOCK}\n"
+      updated ||= "#{text}#{separator}#{block}\n"
       write_atomic(path, updated, mode: File.stat(path).mode & 0o7777)
       puts "   ✓ installed: #{path}"
     rescue JSON::ParserError
@@ -194,7 +229,7 @@ module Omaflow
         raise SetupError, "#{path} has an incomplete or duplicate Omaflow marker block; it needs manual attention"
       end
 
-      start_at = line_start(text, begins.first)
+      start_at = begins.first
       end_at = line_end(text, ends.first)
       "#{text[0...start_at]}#{block}#{text[end_at..]}"
     end
@@ -202,14 +237,13 @@ module Omaflow
     def marker_positions(text, marker)
       positions = []
       offset = 0
-      while (position = text.index(marker, offset))
-        positions << position
-        offset = position + marker.length
+      text.each_line do |line|
+        positions << offset if line.strip == marker
+        offset += line.length
       end
       positions
     end
 
-    def line_start(text, position) = text.rindex("\n", position - 1)&.next || 0
     def line_end(text, position) = text.index("\n", position) || text.length
 
     def write_atomic(path, content, mode:)
@@ -304,10 +338,17 @@ module Omaflow
 
     def bindings_file
       paths = [
+        File.join(Dir.home, '.config', 'hypr', 'bindings.lua'),
         File.join(Dir.home, '.config', 'hypr', 'bindings.conf'),
         File.join(Dir.home, '.config', 'hypr', 'hyprland.conf')
       ]
       paths.find { File.exist?(it) || File.symlink?(it) }
+    end
+
+    def binding_format(path)
+      return [LUA_BINDINGS_BLOCK, LUA_BINDINGS_BEGIN, LUA_BINDINGS_END] if File.extname(path) == '.lua'
+
+      [BINDINGS_BLOCK, BINDINGS_BEGIN, BINDINGS_END]
     end
 
     def manual_steps
@@ -315,7 +356,9 @@ module Omaflow
         Omaflow setup needs an interactive terminal. Run `omaflow setup --yes`, or complete these steps manually:
         1. Link #{cli_link} to #{File.join(PLUGIN_DIR, 'bin', 'omaflow')}.
         2. Add the Omaflow Automations entry between #{MENU_BEGIN.inspect} and #{MENU_END.inspect} in #{menu_file}.
-        3. Add this binding between #{BINDINGS_BEGIN.inspect} and #{BINDINGS_END.inspect} in your Hyprland bindings file:
+        3. In bindings.lua, add this binding between #{LUA_BINDINGS_BEGIN.inspect} and #{LUA_BINDINGS_END.inspect}:
+           #{LUA_BINDINGS_BLOCK.lines[1..-2].map(&:rstrip).join("\n           ")}
+           For bindings.conf or hyprland.conf, use #{BINDINGS_BEGIN.inspect} and #{BINDINGS_END.inspect} around:
            #{BINDINGS_BLOCK.lines[1].strip}
         4. Check ruby, hyprctl, nmcli, directory permissions, shell IPC, and an agent CLI.
       TEXT

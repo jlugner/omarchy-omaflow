@@ -5,6 +5,8 @@ module Omaflow
     INBOX_LIMIT = 20
     EVENT_DATA_LIMIT = 10
     EVENT_BYTES_LIMIT = 16_384
+    INBOX_SCAN_LIMIT = 256
+    MONITOR_LIMIT = 16
     WINDOW_LIMIT = 100
     WINDOW_EVENT_LIMIT = 10
 
@@ -39,23 +41,26 @@ module Omaflow
 
     def drain_inbox
       events = []
-      candidates = 0
+      candidates = []
       Dir.each_child(Paths.inbox_dir) do |entry|
-        next if entry.start_with?('.')
-
+        candidates << entry
+        break if candidates.size >= INBOX_SCAN_LIMIT
+      end
+      candidates.sort.reject { inbox_entry_ignored?(it) }.first(INBOX_LIMIT).each do |entry|
         path = File.join(Paths.inbox_dir, entry)
-        next if File.lstat(path).directory?
-
-        candidates += 1
-        event = read_custom_event(path) if candidates <= INBOX_LIMIT
+        event = read_custom_event(path)
         events << event if event
         discard_inbox_file(path:)
-      rescue StandardError
-        discard_inbox_file(path:) if path
       end
       events
     rescue StandardError
       events
+    end
+
+    def inbox_entry_ignored?(entry)
+      entry.start_with?('.') || File.lstat(File.join(Paths.inbox_dir, entry)).directory?
+    rescue StandardError
+      false
     end
 
     def discard_inbox_file(path:)
@@ -76,7 +81,7 @@ module Omaflow
 
         sanitized[key] = value
       end
-      { 'type' => 'custom', 'data' => { 'name' => payload['name'] }.merge(data) }
+      { 'type' => 'custom', 'data' => data.merge('name' => payload['name'], 'at' => payload['at']) }
     rescue StandardError
       nil
     end
@@ -119,9 +124,12 @@ module Omaflow
       rescue StandardError
         nil
       end
-      return nil unless parsed.is_a?(Array)
+      return nil unless parsed.is_a?(Array) && parsed.size <= MONITOR_LIMIT
+      return nil unless parsed.all? { it.is_a?(Hash) && it['name'].is_a?(String) && it['description'].is_a?(String) }
 
-      parsed.map { { 'name' => it['name'], 'description' => it['description'] } }
+      parsed.map do |monitor|
+        { 'name' => clean_probe_string(monitor['name']), 'description' => clean_probe_string(monitor['description']) }
+      end
     end
 
     def probe_windows
@@ -131,14 +139,17 @@ module Omaflow
       rescue StandardError
         nil
       end
-      return nil unless parsed.is_a?(Array) && parsed.all?(Hash)
+      return nil unless parsed.is_a?(Array) && parsed.size <= WINDOW_LIMIT && parsed.all?(Hash)
 
-      parsed.first(WINDOW_LIMIT).map do |window|
-        { 'address' => window['address'], 'class' => window['class'].to_s[0, 120], 'title' => window['title'].to_s[0, 120] }
+      parsed.map do |window|
+        { 'address' => window['address'], 'class' => clean_probe_string(window['class'].to_s),
+          'title' => clean_probe_string(window['title'].to_s) }
       end
     rescue StandardError
       nil
     end
+
+    def clean_probe_string(value) = value.gsub(/[[:cntrl:]]/, '')[0, 120]
 
     def probe_ssid
       output, ok = Sys.capture('nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi')
@@ -211,8 +222,9 @@ module Omaflow
       current_addresses = @current['windows'].map { it['address'] }
       added = @current['windows'].reject { previous_addresses.include?(it['address']) }
       removed = @previous['windows'].reject { current_addresses.include?(it['address']) }
-      (added.map { { 'type' => 'app-opened', 'data' => window_event_data(it) } } +
-        removed.map { { 'type' => 'app-closed', 'data' => window_event_data(it) } }).first(WINDOW_EVENT_LIMIT)
+      events = added.map { { 'type' => 'app-opened', 'data' => window_event_data(it) } } +
+               removed.map { { 'type' => 'app-closed', 'data' => window_event_data(it) } }
+      events.size > WINDOW_EVENT_LIMIT ? [] : events
     end
 
     def window_event_data(window) = { 'class' => window['class'], 'title' => window['title'] }
@@ -284,8 +296,7 @@ module Omaflow
         target = (trigger.dig('match', 'description') || trigger.dig('match', 'name')).to_s.downcase
         "#{data['description']} #{data['name']}".downcase.include?(target)
       when 'app-opened', 'app-closed'
-        target = (trigger.dig('match', 'class') || trigger.dig('match', 'title')).to_s.downcase
-        "#{data['class']} #{data['title']}".downcase.include?(target)
+        app_matches?(trigger['match'], data)
       when 'wifi-connected'
         match = trigger['match'] || {}
         if match['known'] == false then data['known'] == false
@@ -340,8 +351,12 @@ module Omaflow
     def app_running?(condition)
       return false unless @probes.key?('windows')
 
-      target = (condition.dig('match', 'class') || condition.dig('match', 'title')).to_s.downcase
-      @current['windows'].any? { "#{it['class']} #{it['title']}".downcase.include?(target) }
+      @current['windows'].any? { app_matches?(condition['match'], it) }
+    end
+
+    def app_matches?(match, window)
+      field = match.key?('class') ? 'class' : 'title'
+      window[field].to_s.downcase.include?(match[field].to_s.downcase)
     end
 
     def lid_state?(state)

@@ -11,22 +11,22 @@ module Omaflow
         {"type":"lid-opened"}
         {"type":"lid-closed"}
         {"type":"monitor-connected","match":{"description":"<substring>"}} (or match.name)
-        {"type":"monitor-disconnected","match":{"description":"<substring>"}}
+        {"type":"monitor-disconnected","match":{"description":"<substring>"}} (or match.name)
         {"type":"app-opened","match":{"class":"<substring>"}} (or match.title)
         {"type":"app-closed","match":{"class":"<substring>"}} (or match.title)
         {"type":"wifi-connected","match":{"ssid":"<substring or *>"}} or {"type":"wifi-connected","match":{"known":false}} for never-seen networks
         {"type":"wifi-disconnected"}
         {"type":"power-source","source":"ac"|"battery"}
-        {"type":"custom","name":"<lowercase slug>"} — fires through omaflow trigger <name> [key=value ...]
+        {"type":"custom","name":"<lowercase slug>"} — fires through omaflow trigger <name> [key=value ...]; {{at}} is the envelope timestamp
       Conditions (all must hold at fire time):
         {"type":"time-between","from":"HH:MM","to":"HH:MM"}
         {"type":"weekday","days":[...]}
         {"type":"on-power","source":"ac"|"battery"}
         {"type":"lid-state","state":"open"|"closed"}
-        {"type":"monitor-present","match":{"description":"<substring>"}}
+        {"type":"monitor-present","match":{"description":"<substring>"}} (or match.name)
         {"type":"app-running","match":{"class":"<substring>"}} (or match.title)
         {"type":"on-ssid","ssid":"<substring>"}
-      App class/title matching is a case-insensitive substring match against both fields; prefer stable class fragments such as zoom, slack, or firefox.
+      App class/title matching is a case-insensitive substring match against the selected field; prefer stable class fragments such as zoom, slack, or firefox.
       Actions (executed in order):
         {"type":"theme","name":"<installed theme>"}
         {"type":"dnd","state":"on"|"off"}

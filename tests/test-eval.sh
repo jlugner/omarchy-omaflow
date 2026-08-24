@@ -117,6 +117,37 @@ if run_env "$plugin_dir/bin/omaflow" trigger deploy-done -env=prod 2>/dev/null; 
   echo "bad custom event data unexpectedly accepted" >&2
   exit 1
 fi
+reserved_status=0
+run_env "$plugin_dir/bin/omaflow" trigger deploy-done name=spoofed >/dev/null 2>&1 || reserved_status=$?
+[[ $reserved_status == 2 ]]
+[[ -z $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit) ]]
+
+cat >"$rules_dir/custom-spoofed.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "custom-spoofed", "name": "Custom spoofed", "enabled": true,
+  "trigger": {"type": "custom", "name": "spoofed"},
+  "actions": [{"type": "notify", "message": "spoofed-event-fired"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+printf '%s\n' '{"name":"deploy-done","data":{"name":"spoofed","env":"crafted"},"at":"2026-08-24T12:00:00Z"}' \
+  >"$state/inbox/envelope.json"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" custom
+grep -q 'omarchy-notification-send.*deployed craftedxend' "$calls"
+! grep -q 'spoofed-event-fired' "$calls"
+run_env jq -e '.trigger | contains("name=deploy-done") and contains("at=2026-08-24T12:00:00Z")' \
+  <(grep '"ruleId":"custom-deploy"' "$state/log.jsonl" | tail -1) >/dev/null
+
+for number in $(seq -w 1 25); do
+  printf '{"name":"deploy-done","data":{"env":"fair-%s"},"at":"2026-08-24T12:00:00Z"}\n' "$number" \
+    >"$state/inbox/fair-$number.json"
+done
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" custom
+[[ $(grep -c 'omarchy-notification-send.*deployed fair-' "$calls") == 20 ]]
+[[ $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -type f | wc -l) == 5 ]]
+run_env "$plugin_dir/bin/omaflow-eval" custom
+[[ $(grep -c 'omarchy-notification-send.*deployed fair-' "$calls") == 25 ]]
 [[ -z $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit) ]]
 
 # 2. A matching monitor appears: dock-setup fires, disabled-rule does not.
@@ -467,17 +498,25 @@ cat >"$rules_dir/app-closed.json" <<'EOF'
   "actions": [{"type": "notify", "message": "closed {{class}} {{title}}"}], "cooldownSeconds": 0, "source": "test"
 }
 EOF
-echo '[{"address":"0x1","class":"kitty","title":"Terminal"},{"address":"0x2","class":"com.slack.Slack","title":"Team Chat"}]' >"$TEST_CLIENTS"
+cat >"$rules_dir/class-only-zoom.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "class-only-zoom", "name": "Class only zoom", "enabled": true,
+  "trigger": {"type": "app-opened", "match": {"class": "zoom"}},
+  "actions": [{"type": "notify", "message": "class-only-zoom-fired"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"},{"address":"0x2","class":"com.slack.Slack","title":"Team Chat"},{"address":"0x3","class":"editor","title":"Zoom notes"}]' >"$TEST_CLIENTS"
 : >"$calls"
 run_env "$plugin_dir/bin/omaflow-eval" windows
 grep -q 'omarchy-notification-send.*opened com.slack.Slack Team Chat' "$calls"
-run_env jq -e '.windows | length == 2' "$state/domains.json" >/dev/null
+! grep -q 'class-only-zoom-fired' "$calls"
+run_env jq -e '.windows | length == 3' "$state/domains.json" >/dev/null
 
 echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
 : >"$calls"
 TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" windows
 ! grep -q 'omarchy-notification-send.*closed' "$calls"
-run_env jq -e '.windows | length == 2 and .[1].title == "Team Chat"' "$state/domains.json" >/dev/null
+run_env jq -e '.windows | length == 3 and .[1].title == "Team Chat"' "$state/domains.json" >/dev/null
 run_env "$plugin_dir/bin/omaflow-eval" windows
 grep -q 'omarchy-notification-send.*closed com.slack.Slack Team Chat' "$calls"
 
@@ -490,19 +529,48 @@ cat >"$rules_dir/window-storm.json" <<'EOF'
 EOF
 {
   printf '[{"address":"0x1","class":"kitty","title":"Terminal"}'
-  long_title=$(printf 'x%.0s' {1..130})
-  for number in $(seq 1 105); do
-    title="Storm $number"
-    [[ $number == 1 ]] && title=$long_title
-    printf ',{"address":"0xstorm%s","class":"storm-app","title":"%s"}' "$number" "$title"
+  for number in $(seq 1 100); do
+    printf ',{"address":"0xstorm%s","class":"storm-app","title":"Storm %s"}' "$number" "$number"
   done
   printf ']\n'
 } >"$TEST_CLIENTS"
 : >"$calls"
 run_env "$plugin_dir/bin/omaflow-eval" windows
-storm_count=$(grep -c 'omarchy-notification-send.*storm' "$calls" || true)
-[[ $storm_count == 10 ]]
-run_env jq -e '.windows | length == 100 and (.[1].title | length) == 120' "$state/domains.json" >/dev/null
+! grep -q 'omarchy-notification-send.*storm' "$calls"
+run_env jq -e '.windows | length == 1 and .[0].address == "0x1"' "$state/domains.json" >/dev/null
+
+{
+  printf '[{"address":"0x1","class":"kitty","title":"Terminal"}'
+  for number in $(seq 1 12); do
+    printf ',{"address":"0xstorm%s","class":"storm-app","title":"Storm %s"}' "$number" "$number"
+  done
+  printf ']\n'
+} >"$TEST_CLIENTS"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" windows
+! grep -q 'omarchy-notification-send.*storm' "$calls"
+run_env jq -e '.windows | length == 13' "$state/domains.json" >/dev/null
+
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
+run_env "$plugin_dir/bin/omaflow-eval" windows
+cat >"$rules_dir/clean-title.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "clean-title", "name": "Clean title", "enabled": true,
+  "trigger": {"type": "app-opened", "match": {"title": "Alert"}},
+  "actions": [{"type": "notify", "message": "clean {{title}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+printf '%s\n' '[{"address":"0x1","class":"kitty","title":"Terminal"},{"address":"0xescape","class":"safe\u001bclass","title":"Alert\u001b[31m"}]' >"$TEST_CLIENTS"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" windows
+grep -q 'omarchy-notification-send.*clean Alert\[31m' "$calls"
+run_env jq -e '.windows[1].class == "safeclass" and .windows[1].title == "Alert[31m"' "$state/domains.json" >/dev/null
+! grep -Fq '\u001b' "$state/domains.json"
+! grep -Fq '\u001b' <(grep '"ruleId":"clean-title"' "$state/log.jsonl")
+if LC_ALL=C grep -q $'\033' "$state/domains.json" <(grep '"ruleId":"clean-title"' "$state/log.jsonl"); then
+  echo "control byte survived window ingestion" >&2
+  exit 1
+fi
 
 cat >"$rules_dir/app-running-interval.json" <<'EOF'
 {
@@ -533,5 +601,20 @@ echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
 rewind_minute
 run_env "$plugin_dir/bin/omaflow-eval" windows
 ! grep -q 'focus-app-running' "$calls"
+
+monitors_before=$(run_env jq -c '.monitors' "$state/domains.json")
+/usr/bin/ruby -r json -e 'puts JSON.generate(17.times.map { |number| { "name" => "DP-#{number}", "description" => "Monitor #{number}" } })' \
+  >"$TEST_MONITORS"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" monitors
+[[ $(run_env jq -c '.monitors' "$state/domains.json") == "$monitors_before" ]]
+printf '%s\n' '[{"name":"DP-1","description":42}]' >"$TEST_MONITORS"
+run_env "$plugin_dir/bin/omaflow-eval" monitors
+[[ $(run_env jq -c '.monitors' "$state/domains.json") == "$monitors_before" ]]
+/usr/bin/ruby -r json -e 'puts JSON.generate([{ "name" => "DP-\e1", "description" => ("d" * 130) + "\n" }])' \
+  >"$TEST_MONITORS"
+run_env "$plugin_dir/bin/omaflow-eval" monitors
+run_env jq -e '.monitors[0].name == "DP-1" and (.monitors[0].description | length) == 120' "$state/domains.json" >/dev/null
+! grep -Fq '\u001b' "$state/domains.json"
 
 echo "test-eval: ok"
