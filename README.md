@@ -22,12 +22,6 @@ Install Omaflow from the Omarchy plugin manager:
 omarchy plugin add https://github.com/jlugner/omarchy-omaflow.git --enable
 ```
 
-You can also clone it directly:
-
-```bash
-git clone https://github.com/jlugner/omarchy-omaflow.git ~/.config/omarchy/plugins/jesperlugner.omaflow
-```
-
 Then run setup:
 
 ```bash
@@ -36,7 +30,7 @@ Then run setup:
 
 After the CLI link exists, the command is `omaflow setup`.
 
-To uninstall, run `~/.config/omarchy/plugins/jesperlugner.omaflow/install.sh --remove`, delete the omaflow marker blocks from `~/.config/omarchy/extensions/omarchy-menu.jsonc` and your Hyprland bindings file, then run `omarchy plugin remove jesperlugner.omaflow`. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
+To uninstall, delete the `omaflow` link in `~/.local/bin`, remove the omaflow marker blocks from `~/.config/omarchy/extensions/omarchy-menu.jsonc` and your Hyprland bindings file, then run `omarchy plugin remove jesperlugner.omaflow`. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
 
 ## Use
 
@@ -121,7 +115,6 @@ omarchy plugin validate ~/.config/omarchy/plugins/jesperlugner.omaflow
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-eval.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-author.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-hardening.sh
-~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-install.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-setup.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-scripts.sh
 ```
