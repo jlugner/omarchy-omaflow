@@ -91,7 +91,10 @@ module Omaflow
 
     def safe_stat?(stat)
       trusted_owner = stat.uid.zero? || stat.uid == Process.uid || stat.uid == File.lstat('/').uid
-      trusted_owner && stat.mode.nobits?(0o022)
+      return false unless trusted_owner
+      return true if stat.mode.nobits?(0o022)
+
+      stat.directory? && stat.mode.anybits?(0o1000)
     end
 
     def probe_available?(probe)

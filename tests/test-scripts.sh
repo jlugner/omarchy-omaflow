@@ -100,6 +100,13 @@ if run_env "$plugin_dir/bin/omaflow" scripts add unsafe-ancestor "$unsafe_ancest
   echo "script below a writable ancestor unexpectedly allowed" >&2
   exit 1
 fi
+sticky_ancestor="$test_root/sticky-ancestor"
+mkdir -p "$sticky_ancestor/safe-child"
+cp "$approved" "$sticky_ancestor/safe-child/script"
+chmod 700 "$sticky_ancestor/safe-child" "$sticky_ancestor/safe-child/script"
+chmod 1777 "$sticky_ancestor"
+run_env "$plugin_dir/bin/omaflow" scripts add sticky-ok "$sticky_ancestor/safe-child/script" >/dev/null
+run_env "$plugin_dir/bin/omaflow" scripts remove sticky-ok >/dev/null
 if run_env "$plugin_dir/bin/omaflow" scripts add relative refresh-desk 2>/dev/null; then
   echo "relative script path unexpectedly allowed" >&2
   exit 1
