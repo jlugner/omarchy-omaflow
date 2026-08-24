@@ -209,7 +209,21 @@ if run_env "$plugin_dir/bin/omaflow-run" evil-hook 2>/dev/null; then
 fi
 ! grep -q curl "$calls"
 
-# 9. Corrupt domain state quarantines and re-baselines instead of stalling.
+# 9. Reverting a run whose actions were all non-revertible (empty snapshot)
+#    succeeds as a no-op instead of being mistaken for corrupt state.
+cat >"$rules_dir/notify-only.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "notify-only", "name": "Notify only", "enabled": true,
+  "trigger": {"type": "manual"},
+  "actions": [{"type": "notify", "message": "hello"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+run_env "$plugin_dir/bin/omaflow-run" notify-only --trigger test
+exec_id=$(grep '"ruleId":"notify-only"' "$state/log.jsonl" | tail -1 | jq -r '.execId')
+run_env "$plugin_dir/bin/omaflow-run" --revert "$exec_id"
+run_env jq -e '.kind == "revert" and .status == "ok"' <(grep "\"execId\":\"$exec_id\"" "$state/log.jsonl" | tail -1) >/dev/null
+
+# 10. Corrupt domain state quarantines and re-baselines instead of stalling.
 echo 'not json' >"$state/domains.json"
 run_env "$plugin_dir/bin/omaflow-eval" test
 run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null

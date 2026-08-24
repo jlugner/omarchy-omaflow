@@ -11,12 +11,12 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm jq git util-linux findutils
+        run: pacman -Syu --noconfirm jq git util-linux findutils ruby
 
       - uses: actions/checkout@v4
 
-      - name: Syntax-check scripts
-        run: bash -n bin/omaflow bin/omaflow-author bin/omaflow-eval bin/omaflow-lib.sh bin/omaflow-run bin/omaflow-validate tests/*.sh
+      - name: Syntax-check sources
+        run: for f in bin/* lib/omaflow.rb lib/omaflow/*.rb; do ruby -c "$f" >/dev/null; done && bash -n tests/*.sh
 
       - name: Manifest sanity check
         run: |

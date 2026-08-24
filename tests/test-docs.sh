@@ -1,41 +1,56 @@
 #!/bin/bash
 
-# The authoring agent only knows what omaflow-author's schema doc tells it.
-# This test pins the executor, the validator, and that schema doc to one
-# vocabulary, so a new type can't ship half-wired (runnable but unknown to
-# the agent, or advertised but rejected).
+# The authoring agent only knows what Author::SCHEMA_DOC tells it. This test
+# pins the vocabulary constants, the executor's handlers, the validator's
+# checks, and the schema doc to one another, so a new type can't ship
+# half-wired. The static list below forces a conscious update on any change.
 
 set -euo pipefail
 plugin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+test_root=$(mktemp -d)
+trap 'rm -rf "$test_root"' EXIT
 
-expected_actions="theme dnd nightlight stay-awake launch workspace audio-output webhook notify"
-expected_triggers="manual time monitor-connected monitor-disconnected wifi-connected wifi-disconnected power-source"
-expected_conditions="time-between weekday on-power monitor-present on-ssid"
+expected="trigger manual
+trigger time
+trigger monitor-connected
+trigger monitor-disconnected
+trigger wifi-connected
+trigger wifi-disconnected
+trigger power-source
+condition time-between
+condition weekday
+condition on-power
+condition monitor-present
+condition on-ssid
+action theme
+action dnd
+action nightlight
+action stay-awake
+action launch
+action workspace
+action audio-output
+action webhook
+action notify"
 
-# The executor's case labels are the ground truth for what actually runs.
-run_actions=$(grep -oE '^  [a-z][a-z-]*( \| [a-z][a-z-]*)*\)$' "$plugin_dir/bin/omaflow-run" |
-  tr -d ') ' | tr '|' '\n' | sort)
-if [[ "$(tr ' ' '\n' <<<"$expected_actions" | sort)" != "$run_actions" ]]; then
-  echo "executor action types drifted from the expected list — update test-docs.sh AND every file below:" >&2
-  diff <(tr ' ' '\n' <<<"$expected_actions" | sort) <(printf '%s\n' "$run_actions") >&2 || true
+actual=$(HOME="$test_root" XDG_CONFIG_HOME="$test_root/config" XDG_STATE_HOME="$test_root/state" \
+  "$plugin_dir/bin/omaflow" vocabulary)
+if [[ "$actual" != "$expected" ]]; then
+  echo "vocabulary drifted from the expected list — update test-docs.sh AND every place below:" >&2
+  diff <(echo "$expected") <(echo "$actual") >&2 || true
   exit 1
 fi
 
-check_everywhere() { # kind, types...
-  local kind="$1" t
-  shift
-  for t in "$@"; do
-    grep -q "\"type\":\"$t\"" "$plugin_dir/bin/omaflow-author" ||
-      { echo "$kind '$t' missing from the authoring schema doc (omaflow-author)" >&2; exit 1; }
-    grep -qE "(^|[ |])$t( \||\))" "$plugin_dir/bin/omaflow-validate" ||
-      { echo "$kind '$t' missing from the validator (omaflow-validate)" >&2; exit 1; }
-  done
-}
-# shellcheck disable=SC2086
-check_everywhere action $expected_actions
-# shellcheck disable=SC2086
-check_everywhere trigger $expected_triggers
-# shellcheck disable=SC2086
-check_everywhere condition $expected_conditions
+/usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
+  vocab = Omaflow::Vocabulary
+  abort "executor handlers != vocabulary actions" unless Omaflow::Executor::HANDLERS.keys.sort == vocab::ACTIONS.sort
+  abort "executor snapshots reference unknown actions" unless (Omaflow::Executor::SNAPSHOTTED.keys - vocab::ACTIONS).empty?
+  abort "validator action checks != vocabulary" unless Omaflow::Validator::ACTION_CHECKS.keys.sort == vocab::ACTIONS.sort
+  abort "validator trigger checks != vocabulary" unless Omaflow::Validator::TRIGGER_CHECKS.keys.sort == vocab::TRIGGERS.sort
+  abort "validator condition checks != vocabulary" unless Omaflow::Validator::CONDITION_CHECKS.keys.sort == vocab::CONDITIONS.sort
+  doc = Omaflow::Author::SCHEMA_DOC
+  (vocab::ACTIONS + vocab::TRIGGERS + vocab::CONDITIONS).each do |type|
+    abort "#{type} missing from the authoring schema doc" unless doc.include?("\"type\":\"#{type}\"")
+  end
+'
 
 echo "test-docs: ok"

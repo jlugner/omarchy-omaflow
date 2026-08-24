@@ -4,7 +4,7 @@ Apple Shortcuts, for [Omarchy](https://omarchy.org). Except you don't build the 
 
 > "When I dock my ultrawide on weekday mornings, switch to my work theme and open Slack on workspace 3."
 
-Codex, Claude Code, or Grok turns that into a small JSON rule. From then on no AI is involved: a tiny engine runs the rule instantly, offline, the same way every time. All your automations live in one place. Browse them, dry-run them, disable them, and read the timeline that explains every firing. Rules are plain files, so you can inspect, test, and move them to another machine without ever reopening an agent.
+Codex, Claude Code, or Grok turns that into a small JSON rule. From then on no AI is involved: a tiny Ruby engine runs the rule instantly, offline, the same way every time. All your automations live in one place. Browse them, dry-run them, disable them, and read the timeline that explains every firing. Rules are plain files, so you can inspect, test, and move them to another machine without ever reopening an agent.
 
 ![The Omaflow inspector: rules with live status and the activity timeline](preview.jpg)
 
@@ -12,7 +12,7 @@ Codex, Claude Code, or Grok turns that into a small JSON rule. From then on no A
 
 - Omarchy 4 with `omarchy-shell`
 - One agent CLI, signed in: [Codex](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code), or Grok. Used to write rules, never to run them.
-- `jq`, `hyprctl`, `nmcli`, `pactl` (all on stock Omarchy)
+- `ruby`, `hyprctl`, `nmcli`, `pactl` (all on stock Omarchy)
 
 ## Install
 
