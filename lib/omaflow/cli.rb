@@ -12,7 +12,9 @@ module Omaflow
         omaflow setup [--yes]       wire the CLI, menu, and optional hotkey
         omaflow list                list rules
         omaflow author "<text>" [--agent codex|claude|grok]
+        omaflow stage-file <path>
         omaflow stage <accept|reject|show>
+        omaflow describe <id>
         omaflow run <id> [--dry-run]
         omaflow enable <id> | disable <id>
         omaflow delete <id>
@@ -48,7 +50,9 @@ module Omaflow
       when 'first-run' then Onboarding.first_run
       when 'list' then list
       when 'author' then author_command(argv)
+      when 'stage-file' then stage_file(argv.first)
       when 'stage' then stage(argv)
+      when 'describe' then describe(argv.first)
       when 'run' then run_command(argv)
       when 'enable' then set_enabled(argv.first, value: true)
       when 'disable' then set_enabled(argv.first, value: false)
@@ -124,6 +128,65 @@ module Omaflow
       0
     end
 
+    def stage_file(path)
+      unless path
+        warn 'Usage: omaflow stage-file <path>'
+        return 2
+      end
+      rule = Store.load_json!(path, {})
+      errors, warnings = Validator.new(rule).validate
+      return stage_file_error(rule['name'].to_s, errors) unless errors.empty?
+
+      staging = {
+        'status' => 'ready',
+        'agent' => 'manual',
+        'request' => rule['name'],
+        'updatedAt' => Sys.now_iso,
+        'rule' => rule,
+        'warnings' => warnings.map { "warn: #{it}" }
+      }
+      return 1 unless write_staging(staging).zero?
+
+      puts "Staged rule: #{rule['name']}"
+      0
+    rescue StandardError
+      stage_file_error(File.basename(path.to_s), ['not a JSON object'])
+    end
+
+    def stage_file_error(request, errors)
+      lines = errors.map { "error: #{it}" }
+      lines.each { puts it }
+      staging = {
+        'status' => 'error',
+        'agent' => 'manual',
+        'request' => request,
+        'updatedAt' => Sys.now_iso,
+        'error' => lines.join("\n")
+      }
+      write_staging(staging)
+      1
+    end
+
+    def write_staging(staging)
+      return 0 if Store.with_lock('.staging.lock', timeout: 10) { Store.write_json(Paths.staging_file, staging) }
+
+      warn 'Staging is busy'
+      1
+    end
+
+    def describe(id)
+      path = id && Paths.rule_file(id)
+      unless path && File.exist?(path)
+        warn "No such rule: #{id}"
+        return 1
+      end
+      puts JSON.pretty_generate(Store.load_json!(path, {}))
+      0
+    rescue StandardError
+      warn "Rule file is not valid JSON: #{path}"
+      1
+    end
+
     def stage_accept
       result = 1
       locked = Store.with_lock('.staging.lock', timeout: 10) { result = install_staged }
@@ -141,25 +204,30 @@ module Omaflow
         return 1
       end
       rule = staged['rule']
-      id = free_rule_id(rule['id'])
+      replacing = staged['agent'] == 'manual' && rule.key?('createdAt') && File.exist?(Paths.rule_file(rule['id']).to_s)
+      id = replacing ? rule['id'] : free_rule_id(rule['id'])
       unless id
         warn 'Staged rule has an invalid id'
         return 1
       end
-      rule = rule.merge('id' => id, 'createdAt' => Sys.now_iso)
+      rule = rule.merge('id' => id, 'createdAt' => replacing ? rule['createdAt'] : Sys.now_iso)
       errors, = Validator.new(rule).validate
       unless errors.empty?
         warn 'Staged rule no longer validates'
         return 1
       end
-      unless Store.install_json(Paths.rule_file(id), rule)
-        warn 'Rule id collided; try again'
-        return 1
+      if replacing
+        Store.write_json(Paths.rule_file(id), rule)
+      else
+        unless Store.install_json(Paths.rule_file(id), rule)
+          warn 'Rule id collided; try again'
+          return 1
+        end
       end
       File.delete(Paths.staging_file)
       Store.reindex
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'created', 'ruleId' => id, 'status' => 'ok' })
-      puts "Installed rule: #{id}"
+      Store.log_append({ 'at' => Sys.now_iso, 'kind' => replacing ? 'updated' : 'created', 'ruleId' => id, 'status' => 'ok' })
+      puts "#{replacing ? 'Updated' : 'Installed'} rule: #{id}"
       0
     end
 

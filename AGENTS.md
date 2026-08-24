@@ -4,7 +4,7 @@ For AI agents (and humans) working on this codebase.
 
 ## Shape
 
-The brain is Ruby (stdlib only, no gems), targeting the system `/usr/bin/ruby` that ships with Omarchy. It lives in `lib/omaflow/`; the `bin/` entry points are thin wrappers whose paths must not change (the QML and user keybindings reference them). The QML is deliberately dumb: `Service.qml` only converts signals into `omaflow-eval` invocations, and `Omaflow.qml` only renders state files and shells out to `bin/omaflow`. Rules (config) live in `~/.config/omaflow/rules/`; everything mutable in `~/.local/state/omaflow/`. The overlay watches `index.json`, `log.jsonl`, and `staging.json`; every mutation ends with `Store.reindex`.
+The brain is Ruby (stdlib only, no gems), targeting the system `/usr/bin/ruby` that ships with Omarchy. It lives in `lib/omaflow/`; the `bin/` entry points are thin wrappers whose paths must not change (the QML and user keybindings reference them). The QML is deliberately dumb: `Service.qml` only converts signals into `omaflow-eval` invocations, and `Omaflow.qml` only renders state files and shells out to `bin/omaflow`. The visual editor funnels its JSON through `stage-file` and the existing preview/accept flow, so the validator remains the only gate. Rules (config) live in `~/.config/omaflow/rules/`; everything mutable in `~/.local/state/omaflow/`. The overlay watches `index.json`, `log.jsonl`, and `staging.json`; every mutation ends with `Store.reindex`.
 
 ## Style
 

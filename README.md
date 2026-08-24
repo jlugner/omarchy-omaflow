@@ -36,12 +36,16 @@ To uninstall, delete the `omaflow` link in `~/.local/bin`, remove the omaflow ma
 
 Open the inspector and describe an automation. A preview shows the exact trigger, conditions, and actions. `Return` installs it, `Esc` throws it away. Nothing runs that you haven't read.
 
+Build rules by hand in the editor: `Ctrl+N` starts a new visual chain, while `e` edits the selected rule. Saving opens the same staged preview for final confirmation.
+
 | Key | Action |
 |-----|--------|
 | `Return` | Compile the description, or install the previewed rule |
 | `Alt+Return` | Run the selected rule now |
 | `Ctrl+Return` | Dry-run: log what would execute |
 | `Ctrl+E` | Enable / disable |
+| `Ctrl+N` | Create a rule in the visual editor |
+| `e` | Edit the selected rule |
 | `Alt+Delete` | Delete (confirmed) |
 | `Up` / `Down` | Move the selection |
 | `Esc` | Discard preview / clear / close |
@@ -53,6 +57,7 @@ Everything works from the CLI too:
 ```bash
 omaflow setup [--yes]
 omaflow author "on battery, enable dnd and dim ambitions"
+omaflow stage-file <path> · describe <id>
 omaflow stage show|accept|reject
 omaflow list · run <id> [--dry-run] · enable|disable|delete <id>
 omaflow log · revert <exec-id> · agent [codex|claude|grok|auto] · poke
@@ -116,6 +121,7 @@ omarchy plugin validate ~/.config/omarchy/plugins/jesperlugner.omaflow
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-validate.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-eval.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-author.sh
+~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-editor.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-agent-action.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-hardening.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-setup.sh

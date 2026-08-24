@@ -50,6 +50,9 @@ jobs:
       - name: Authoring pipeline test
         run: tests/test-author.sh
 
+      - name: Visual editor CLI test
+        run: tests/test-editor.sh
+
       - name: Agent action test
         run: tests/test-agent-action.sh
 
