@@ -12,11 +12,15 @@ module Omaflow
     end
 
     def tick
+      @now = Time.now
+      @minute = @now.strftime('%H:%M')
+      @weekday = @now.strftime('%a').downcase
       @previous = previous_domains
-      @current = probe_domains
-      return baseline unless @previous
-
+      @probes = probe_domains
+      @current = (@previous || {}).merge(@probes)
       Store.write_json(Paths.domains_file, @current)
+      return baseline if @previous.nil?
+
       derive_events.each { fire_matching_rules(it) }
     end
 
@@ -35,15 +39,15 @@ module Omaflow
     end
 
     def probe_domains
-      {
-        'monitors' => probe_monitors,
-        'ssid' => probe_ssid,
-        'onAc' => probe_on_ac,
-        'minute' => Time.now.strftime('%H:%M')
-      }
+      probes = { 'minute' => @minute }
+      monitors = probe_monitors
+      probes['monitors'] = monitors if monitors
+      ssid = probe_ssid
+      probes['ssid'] = ssid if ssid
+      on_ac = probe_on_ac
+      probes['onAc'] = on_ac unless on_ac.nil?
+      probes
     end
-
-    def previous_value(key, fallback) = @previous ? @previous.fetch(key, fallback) : fallback
 
     def probe_monitors
       output, ok = Sys.capture('hyprctl', 'monitors', '-j')
@@ -52,14 +56,14 @@ module Omaflow
       rescue StandardError
         nil
       end
-      return previous_value('monitors', []) unless parsed.is_a?(Array)
+      return nil unless parsed.is_a?(Array)
 
       parsed.map { { 'name' => it['name'], 'description' => it['description'] } }
     end
 
     def probe_ssid
       output, ok = Sys.capture('nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi')
-      return previous_value('ssid', '') unless ok
+      return nil unless ok
 
       output.lines(chomp: true).find { it.start_with?('yes:') }&.delete_prefix('yes:').to_s
     end
@@ -71,45 +75,47 @@ module Omaflow
       rescue StandardError
         false
       end
-      return previous_on_ac unless mains
+      return true unless mains
 
-      File.read(File.join(File.dirname(mains), 'online')).strip == '1'
+      online = File.read(File.join(File.dirname(mains), 'online')).strip
+      { '1' => true, '0' => false }[online]
     rescue StandardError
-      previous_on_ac
-    end
-
-    def previous_on_ac
-      value = previous_value('onAc', true)
-      [true, false].include?(value) ? value : true
+      nil
     end
 
     def baseline
-      Store.write_json(Paths.domains_file, @current)
       seed_seen_ssid
       Store.reindex
     end
 
     def seed_seen_ssid
-      return if @current['ssid'].empty?
+      ssid = @current['ssid'].to_s
+      return if ssid.empty?
 
       seen = Store.read_json(Paths.seen_ssids_file, [])
-      Store.write_json(Paths.seen_ssids_file, (seen + [@current['ssid']]).uniq)
+      Store.write_json(Paths.seen_ssids_file, (seen + [ssid]).uniq)
     end
+
+    def domain_fresh?(key) = @previous.key?(key) && @probes.key?(key)
 
     def derive_events
       [*monitor_events, *wifi_events, *power_events, *time_events]
     end
 
     def monitor_events
-      previous_names = @previous['monitors'].to_a.map { it['name'] }
+      return [] unless domain_fresh?('monitors')
+
+      previous_names = @previous['monitors'].map { it['name'] }
       current_names = @current['monitors'].map { it['name'] }
       added = @current['monitors'].reject { previous_names.include?(it['name']) }
-      removed = @previous['monitors'].to_a.reject { current_names.include?(it['name']) }
+      removed = @previous['monitors'].reject { current_names.include?(it['name']) }
       added.map { { 'type' => 'monitor-connected', 'data' => it } } +
         removed.map { { 'type' => 'monitor-disconnected', 'data' => it } }
     end
 
     def wifi_events
+      return [] unless domain_fresh?('ssid')
+
       previous_ssid = @previous['ssid'].to_s
       current_ssid = @current['ssid']
       return [] if previous_ssid == current_ssid
@@ -125,6 +131,7 @@ module Omaflow
     end
 
     def power_events
+      return [] unless domain_fresh?('onAc')
       return [] if @previous['onAc'] == @current['onAc']
 
       [{ 'type' => 'power-source', 'data' => { 'source' => @current['onAc'] ? 'ac' : 'battery' } }]
@@ -144,9 +151,10 @@ module Omaflow
         next unless conditions_pass?(rule)
         next unless cooldown_over?(rule)
 
-        Executor.run(rule['id'], trigger: trigger_description(event))
-      rescue StandardError
-        nil
+        Executor.run(rule['id'], trigger: trigger_description(event), respect_cooldown: true)
+      rescue StandardError => error
+        Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule['id'],
+                           'status' => 'error', 'detail' => "#{error.class}: #{error.message}" })
       end
     end
 
@@ -168,14 +176,12 @@ module Omaflow
         else data['ssid'].to_s.downcase.include?(match['ssid'].to_s.downcase)
         end
       when 'power-source' then data['source'] == trigger['source']
-      when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(weekday)
+      when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
       else true
       end
     end
 
     def trigger_days(trigger) = trigger.fetch('days', Vocabulary::WEEKDAYS)
-
-    def weekday = Time.now.strftime('%a').downcase
 
     def conditions_pass?(rule)
       rule.fetch('conditions', []).all? { condition_passes?(it) }
@@ -184,26 +190,25 @@ module Omaflow
     def condition_passes?(condition)
       case condition['type']
       when 'time-between' then time_between?(condition['from'], condition['to'])
-      when 'weekday' then condition.fetch('days', []).include?(weekday)
+      when 'weekday' then condition.fetch('days', []).include?(@weekday)
       when 'on-power' then (condition['source'] == 'ac') == @current['onAc']
       when 'monitor-present' then monitor_present?(condition)
-      when 'on-ssid' then @current['ssid'].downcase.include?(condition['ssid'].to_s.downcase)
+      when 'on-ssid' then @current['ssid'].to_s.downcase.include?(condition['ssid'].to_s.downcase)
       else false
       end
     end
 
     def time_between?(from, to)
-      minute = @current['minute']
       if from <= to
-        minute.between?(from, to)
+        @minute.between?(from, to)
       else
-        minute >= from || minute <= to
+        @minute >= from || @minute <= to
       end
     end
 
     def monitor_present?(condition)
       target = (condition.dig('match', 'description') || condition.dig('match', 'name')).to_s.downcase
-      @current['monitors'].any? { "#{it['description']} #{it['name']}".downcase.include?(target) }
+      @current.fetch('monitors', []).any? { "#{it['description']} #{it['name']}".downcase.include?(target) }
     end
 
     def cooldown_over?(rule)

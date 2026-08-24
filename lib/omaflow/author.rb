@@ -97,7 +97,7 @@ module Omaflow
       staging = { 'status' => status, 'agent' => @agent.to_s, 'request' => @request, 'updatedAt' => Sys.now_iso }
       staging.merge!('rule' => rule, 'warnings' => warnings) if rule
       staging['error'] = error if error
-      Store.write_json(Paths.staging_file, staging)
+      Store.with_lock('.staging.lock', timeout: 10) { Store.write_json(Paths.staging_file, staging) }
     end
 
     def prompt(attempt_errors)

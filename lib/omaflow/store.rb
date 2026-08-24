@@ -19,11 +19,30 @@ module Omaflow
       fallback
     end
 
+    def load_json!(path, expected)
+      parsed = JSON.parse(File.read(path))
+      raise JSON::ParserError, "#{path} is not a JSON #{expected.class.name.downcase}" unless parsed.instance_of?(expected.class)
+
+      parsed
+    end
+
     def write_json(path, value)
       Paths.ensure_dirs
       tmp = File.join(File.dirname(path), ".#{File.basename(path)}.#{Process.pid}.#{rand(1_000_000)}")
-      File.write(tmp, "#{JSON.generate(value)}\n")
+      File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.puts(JSON.generate(value)) }
       File.rename(tmp, path)
+    end
+
+    def install_json(path, value)
+      Paths.ensure_dirs
+      tmp = File.join(File.dirname(path), ".#{File.basename(path)}.#{Process.pid}.#{rand(1_000_000)}")
+      File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.puts(JSON.generate(value)) }
+      File.link(tmp, path)
+      true
+    rescue Errno::EEXIST
+      false
+    ensure
+      File.delete(tmp) if tmp && File.exist?(tmp)
     end
 
     def with_lock(name, wait: true, timeout: 90)
@@ -45,11 +64,11 @@ module Omaflow
     end
 
     def log_append(entry) = with_lock('.log.lock') do
-      File.open(Paths.log_file, 'a') { it.puts(JSON.generate(entry)) }
+      File.open(Paths.log_file, 'a', 0o600) { it.puts(JSON.generate(entry)) }
       lines = File.readlines(Paths.log_file)
       if lines.size > 500
         tmp = "#{Paths.log_file}.#{Process.pid}"
-        File.write(tmp, lines.last(400).join)
+        File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.write(lines.last(400).join) }
         File.rename(tmp, Paths.log_file)
       end
     end

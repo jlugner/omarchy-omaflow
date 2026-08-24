@@ -229,4 +229,46 @@ run_env "$plugin_dir/bin/omaflow-eval" test
 run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null
 [[ -f $state/domains.json.corrupt ]]
 
+# 11. Two rules firing from one evaluation get distinct execution ids.
+cat >"$rules_dir/twin-a.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "twin-a", "name": "Twin A", "enabled": true,
+  "trigger": {"type": "monitor-connected", "match": {"description": "Twin Screen"}},
+  "actions": [{"type": "notify", "message": "a"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/twin-b.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "twin-b", "name": "Twin B", "enabled": true,
+  "trigger": {"type": "monitor-connected", "match": {"description": "Twin Screen"}},
+  "actions": [{"type": "notify", "message": "b"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+echo '[{"name":"eDP-1","description":"Laptop Screen"},{"name":"DP-3","description":"Dell U3821DW"},{"name":"DP-4","description":"Twin Screen"}]' >"$TEST_MONITORS"
+run_env "$plugin_dir/bin/omaflow-eval" test
+twin_ids=$(grep -E '"ruleId":"twin-(a|b)"' "$state/log.jsonl" | jq -r '.execId')
+[[ $(wc -l <<<"$twin_ids") == 2 ]]
+[[ $(sort -u <<<"$twin_ids" | wc -l) == 2 ]]
+
+# 12. A failed probe at baseline time must not fabricate events once the
+#     probe recovers: the recovered domain re-baselines silently.
+rm -f "$state/domains.json" "$state/domains.json.corrupt"
+TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" test
+run_env jq -e 'has("monitors") | not' "$state/domains.json" >/dev/null
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" test
+! grep -qE 'omarchy-notification-send (a|b)' "$calls"
+run_env jq -e '.monitors | length == 3' "$state/domains.json" >/dev/null
+
+# 13. Secret-bearing files stay private and a corrupt rule can't be clobbered
+#     by an enable/disable read-modify-write.
+run_env "$plugin_dir/bin/omaflow" webhooks add perms-check https://example.com/x json >/dev/null
+[[ $(stat -c '%a' "$test_root/config/omaflow/webhooks.json") == 600 ]]
+echo 'not json' >"$rules_dir/broken.json"
+if run_env "$plugin_dir/bin/omaflow" disable broken 2>/dev/null; then
+  echo "disable of corrupt rule unexpectedly succeeded" >&2
+  exit 1
+fi
+[[ $(cat "$rules_dir/broken.json") == "not json" ]]
+
 echo "test-eval: ok"

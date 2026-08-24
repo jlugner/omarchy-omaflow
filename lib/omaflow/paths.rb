@@ -20,7 +20,13 @@ module Omaflow
     def snapshots_dir = File.join(state_dir, 'snapshots')
     def omarchy_default_agent_file = File.join(ENV.fetch('XDG_CONFIG_HOME') { File.join(Dir.home, '.config') }, 'omarchy', 'defaults', 'agent')
 
-    def ensure_dirs = FileUtils.mkdir_p([rules_dir, state_dir, snapshots_dir])
+    def ensure_dirs
+      FileUtils.mkdir_p([rules_dir, state_dir, snapshots_dir])
+      [config_dir, rules_dir, state_dir, snapshots_dir].each { File.chmod(0o700, it) }
+      [webhooks_file, staging_file, log_file].each { File.chmod(0o600, it) if File.exist?(it) }
+    rescue SystemCallError
+      nil
+    end
 
     def rule_file(id)
       return nil unless id.to_s.match?(/\A[a-z0-9][a-z0-9-]{0,40}\z/)

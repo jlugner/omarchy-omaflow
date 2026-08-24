@@ -128,6 +128,7 @@ module Omaflow
     def check_wifi_connected_trigger(trigger)
       match = trigger['match']
       valid = match.is_a?(Hash) && (match['ssid'] == '*' || safe_str?(match['ssid']) || match['known'] == false)
+      valid &&= match['ssid'] == '*' || safe_str?(match['ssid']) if match.is_a?(Hash) && match.key?('ssid')
       err('wifi-connected needs match.ssid ("*" for any) or match.known: false') unless valid
       unknown_keys(trigger, %w[type match], '.trigger')
       unknown_keys(match, %w[ssid known], '.trigger.match') if match.is_a?(Hash)
@@ -175,6 +176,7 @@ module Omaflow
       target = match.is_a?(Hash) ? match['description'] || match['name'] : nil
       err('monitor-present needs a plain-string match') unless safe_str?(target)
       unknown_keys(condition, %w[type match], 'monitor-present condition')
+      unknown_keys(match, %w[description name], 'monitor-present condition match') if match.is_a?(Hash)
     end
 
     def check_on_ssid(condition)

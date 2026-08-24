@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'tempfile'
 
 module Omaflow
@@ -38,16 +39,23 @@ module Omaflow
       answer&.byteslice(0, OUTPUT_CAP)
     end
 
+    def scratch_dir
+      dir = File.join(Paths.state_dir, '.agent-cwd')
+      FileUtils.mkdir_p(dir)
+      dir
+    end
+
     def run_codex(task)
       Paths.ensure_dirs
       out = Tempfile.create('.agent', Paths.state_dir)
       out.close
-      ok = system('timeout', budget, 'codex', 'exec',
+      ok = system('timeout', '--kill-after=10', budget, 'codex', 'exec',
                   '--skip-git-repo-check', '--sandbox', 'read-only',
                   '--ephemeral', '--ignore-user-config', '--ignore-rules',
+                  '--cd', scratch_dir,
                   '--config', 'notify=[]', '--config', 'model_reasoning_effort="low"',
                   '--output-last-message', out.path, task,
-                  out: File::NULL, err: File::NULL)
+                  out: File::NULL, err: File::NULL, chdir: scratch_dir)
       ok ? File.read(out.path) : nil
     ensure
       File.delete(out.path) if out && File.exist?(out.path)
@@ -57,14 +65,14 @@ module Omaflow
       output, ok = Sys.capture('claude', '-p', task, '--output-format', 'text',
                                '--strict-mcp-config', '--setting-sources', '',
                                '--disallowedTools', *CLAUDE_DISALLOWED_TOOLS,
-                               timeout: budget)
+                               timeout: budget, chdir: scratch_dir)
       ok ? output : nil
     end
 
     def run_grok(task)
       output, ok = Sys.capture('grok', '-p', task, '--output-format', 'plain',
                                '--tools', '', '--disable-web-search',
-                               timeout: budget)
+                               timeout: budget, chdir: scratch_dir)
       ok ? output : nil
     end
 

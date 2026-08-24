@@ -26,8 +26,8 @@ module Omaflow
       'audio-output' => :snapshot_audio_output
     }.freeze
 
-    def self.run(rule_id, dry_run: false, trigger: 'manual')
-      locked = Store.with_lock('.run.lock') { return new.execute(rule_id, dry_run:, trigger:) }
+    def self.run(rule_id, dry_run: false, trigger: 'manual', respect_cooldown: false)
+      locked = Store.with_lock('.run.lock') { return new.execute(rule_id, dry_run:, trigger:, respect_cooldown:) }
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
@@ -41,7 +41,7 @@ module Omaflow
       1
     end
 
-    def execute(rule_id, dry_run:, trigger:)
+    def execute(rule_id, dry_run:, trigger:, respect_cooldown:)
       path = Paths.rule_file(rule_id)
       return self.class.fail_stderr('Invalid rule id') unless path
       return self.class.fail_stderr("No such rule: #{rule_id}") unless File.exist?(path)
@@ -49,10 +49,13 @@ module Omaflow
       @rule = Store.read_json(path, {})
       @rule_id = rule_id
       @trigger_desc = trigger
-      @exec_id = "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{Process.pid}"
+      @exec_id = "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(4)}"
 
-      errors, = Validator.validate_file(path)
+      errors, = Validator.new(@rule).validate
+      errors << "rule id '#{@rule['id']}' does not match its filename" unless @rule['id'] == rule_id
       return log_invalid(errors) unless errors.empty?
+
+      return 0 if respect_cooldown && !cooldown_over?
 
       snapshot = dry_run ? {} : capture_snapshot
       return 1 if snapshot.nil?
@@ -169,6 +172,11 @@ module Omaflow
       ['defaultSink', ok && !output.strip.empty? ? output.strip : nil]
     end
 
+    def cooldown_over?
+      last = Store.read_json(Paths.cooldowns_file, {}).dig(@rule_id, 'lastFiredEpoch').to_i
+      Time.now.to_i - last >= @rule.fetch('cooldownSeconds', 60)
+    end
+
     def apply_actions(dry_run:)
       results = []
       (@rule['actions'] || []).each do |action|
@@ -176,7 +184,11 @@ module Omaflow
           results << { 'type' => action['type'], 'plan' => action, 'ok' => true }
           next
         end
-        detail, ok = send(HANDLERS.fetch(action['type']), action)
+        detail, ok = begin
+          send(HANDLERS.fetch(action['type']), action)
+        rescue StandardError => error
+          ["exception: #{error.class}: #{error.message}", false]
+        end
         results << { 'type' => action['type'], 'detail' => detail, 'ok' => ok }
         return [results, 'failed'] unless ok
       end

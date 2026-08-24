@@ -11,11 +11,13 @@ module Omaflow
     end
 
     def run(*argv, timeout: 30)
-      system('timeout', timeout.to_s, *argv, out: File::NULL, err: File::NULL)
+      system('timeout', '--kill-after=10', timeout.to_s, *argv, out: File::NULL, err: File::NULL)
     end
 
-    def capture(*argv, timeout: 30)
-      out, status = Open3.capture2('timeout', timeout.to_s, *argv, err: File::NULL)
+    def capture(*argv, timeout: 30, chdir: nil)
+      options = { err: File::NULL }
+      options[:chdir] = chdir if chdir
+      out, status = Open3.capture2('timeout', '--kill-after=10', timeout.to_s, *argv, **options)
       [out, status.success?]
     rescue SystemCallError
       ['', false]

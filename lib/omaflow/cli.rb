@@ -142,7 +142,10 @@ module Omaflow
         warn 'Staged rule no longer validates'
         return 1
       end
-      Store.write_json(Paths.rule_file(id), rule)
+      unless Store.install_json(Paths.rule_file(id), rule)
+        warn 'Rule id collided; try again'
+        return 1
+      end
       File.delete(Paths.staging_file)
       Store.reindex
       Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'created', 'ruleId' => id, 'status' => 'ok' })
@@ -193,7 +196,13 @@ module Omaflow
         warn "No such rule: #{id}"
         return 1
       end
-      Store.write_json(path, Store.read_json(path, {}).merge('enabled' => value))
+      rule = begin
+        Store.load_json!(path, {})
+      rescue StandardError
+        warn "Rule file is not valid JSON: #{path}"
+        return 1
+      end
+      Store.write_json(path, rule.merge('enabled' => value))
       Store.reindex
       puts "#{id}: enabled=#{value}"
       0
@@ -288,7 +297,12 @@ module Omaflow
     def webhooks_edit(subcommand, argv)
       result = 1
       locked = Store.with_lock('.webhooks.lock', timeout: 10) do
-        hooks = Store.read_json(Paths.webhooks_file, {})
+        hooks = begin
+          File.exist?(Paths.webhooks_file) ? Store.load_json!(Paths.webhooks_file, {}) : {}
+        rescue StandardError
+          warn "Webhook config is not valid JSON: #{Paths.webhooks_file}"
+          next
+        end
         result = subcommand == 'add' ? webhook_add(hooks, argv) : webhook_remove(hooks, argv.first)
       end
       unless locked
