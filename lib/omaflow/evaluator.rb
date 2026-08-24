@@ -2,6 +2,10 @@
 
 module Omaflow
   class Evaluator
+    INBOX_LIMIT = 20
+    EVENT_DATA_LIMIT = 10
+    EVENT_BYTES_LIMIT = 16_384
+
     def self.tick(reason = 'tick')
       Store.with_lock('.eval.lock', wait: false) { new(reason).tick }
       0
@@ -12,6 +16,7 @@ module Omaflow
     end
 
     def tick
+      custom_events = drain_inbox
       @now = Time.now
       @minute = @now.strftime('%H:%M')
       @weekday = @now.strftime('%a').downcase
@@ -19,12 +24,64 @@ module Omaflow
       @probes = probe_domains
       @current = (@previous || {}).merge(@probes)
       Store.write_json(Paths.domains_file, @current)
-      return baseline if @previous.nil?
+      if @previous.nil?
+        baseline
+      else
+        custom_events.concat(derive_events)
+      end
 
-      derive_events.each { fire_matching_rules(it) }
+      custom_events.each { fire_matching_rules(it) }
     end
 
     private
+
+    def drain_inbox
+      events = []
+      candidates = 0
+      Dir.each_child(Paths.inbox_dir) do |entry|
+        next if entry.start_with?('.')
+
+        path = File.join(Paths.inbox_dir, entry)
+        next if File.lstat(path).directory?
+
+        candidates += 1
+        event = read_custom_event(path) if candidates <= INBOX_LIMIT
+        events << event if event
+        discard_inbox_file(path:)
+      rescue StandardError
+        discard_inbox_file(path:) if path
+      end
+      events
+    rescue StandardError
+      events
+    end
+
+    def discard_inbox_file(path:)
+      File.unlink(path)
+    rescue StandardError
+      nil
+    end
+
+    def read_custom_event(path)
+      payload = JSON.parse(Store.safe_read(path, max_bytes: EVENT_BYTES_LIMIT))
+      return unless payload.instance_of?(Hash) && payload.keys.sort == %w[at data name]
+      return unless payload['name'].is_a?(String) && payload['name'].match?(Validator::SLUG)
+      return unless payload['data'].instance_of?(Hash) && safe_event_string?(payload['at'])
+
+      data = payload['data'].each_with_object({}) do |(key, value), sanitized|
+        next unless safe_event_string?(key) && safe_event_string?(value)
+        next if sanitized.size >= EVENT_DATA_LIMIT
+
+        sanitized[key] = value
+      end
+      { 'type' => 'custom', 'data' => { 'name' => payload['name'] }.merge(data) }
+    rescue StandardError
+      nil
+    end
+
+    def safe_event_string?(value)
+      value.is_a?(String) && value.bytesize.between?(1, 200) && !value.match?(/[[:cntrl:]]/) && !value.start_with?('-')
+    end
 
     def previous_domains
       return nil unless File.exist?(Paths.domains_file)
@@ -174,7 +231,7 @@ module Omaflow
         next unless conditions_pass?(rule)
         next unless cooldown_over?(rule)
 
-        Executor.run(rule['id'], trigger: trigger_description(event), respect_cooldown: true)
+        Executor.run(rule['id'], trigger: trigger_description(event), trigger_data: event['data'], respect_cooldown: true)
       rescue StandardError => e
         Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule['id'],
                            'status' => 'error', 'detail' => "#{e.class}: #{e.message}" })
@@ -202,6 +259,7 @@ module Omaflow
       when 'power-source' then data['source'] == trigger['source']
       when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
       when 'interval' then interval_elapsed?(rule)
+      when 'custom' then data['name'] == trigger['name']
       else true
       end
     end

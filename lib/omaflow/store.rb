@@ -143,6 +143,7 @@ module Omaflow
         elsif trigger['at'] then " #{trigger['at']}"
         elsif trigger['minutes'] then " every #{trigger['minutes']}m"
         elsif trigger['source'] then ": #{trigger['source']}"
+        elsif trigger['name'] then ": #{trigger['name']}"
         else ''
         end
       "#{trigger['type'] || '?'}#{suffix}"

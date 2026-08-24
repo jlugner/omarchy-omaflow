@@ -4,7 +4,7 @@ module Omaflow
   module Vocabulary
     TRIGGERS = %w[
       manual time interval lid-opened lid-closed monitor-connected monitor-disconnected
-      wifi-connected wifi-disconnected power-source
+      wifi-connected wifi-disconnected power-source custom
     ].freeze
     CONDITIONS = %w[time-between weekday on-power lid-state monitor-present on-ssid].freeze
     ACTIONS = %w[theme dnd nightlight stay-awake launch workspace audio-output script webhook notify].freeze

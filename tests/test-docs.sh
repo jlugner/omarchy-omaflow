@@ -21,6 +21,7 @@ trigger monitor-disconnected
 trigger wifi-connected
 trigger wifi-disconnected
 trigger power-source
+trigger custom
 condition time-between
 condition weekday
 condition on-power

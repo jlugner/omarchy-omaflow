@@ -15,6 +15,7 @@ module Omaflow
         {"type":"wifi-connected","match":{"ssid":"<substring or *>"}} or {"type":"wifi-connected","match":{"known":false}} for never-seen networks
         {"type":"wifi-disconnected"}
         {"type":"power-source","source":"ac"|"battery"}
+        {"type":"custom","name":"<lowercase slug>"} — fires through omaflow trigger <name> [key=value ...]
       Conditions (all must hold at fire time):
         {"type":"time-between","from":"HH:MM","to":"HH:MM"}
         {"type":"weekday","days":[...]}
@@ -33,7 +34,7 @@ module Omaflow
         {"type":"script","name":"<allowed script name>"} — runs one exact packaged or user-approved executable. name must be from the allowed scripts inventory; no path, arguments, or shell text are permitted in a rule.
         {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
-      In notify and webhook messages the literal placeholder {{trigger}} is replaced with a description of the firing event.
+      In notify and webhook messages {{trigger}} is replaced with a description of the firing event. Every event data key is also available as {{key}}, including {{ssid}}, {{name}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings.
       Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.
       No other trigger, condition, or action types exist. Never invent fields.
     DOC

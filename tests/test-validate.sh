@@ -95,6 +95,48 @@ grep -q "error: workspace needs an integer" "$test_root/evil.out"
 grep -q "error: cooldownSeconds must be an integer" "$test_root/evil.out"
 grep -q "error: unknown field in .trigger" "$test_root/evil.out"
 
+custom_missing="$test_root/custom-missing.json"
+cat >"$custom_missing" <<'EOF'
+{
+  "schemaVersion": 1, "id": "custom-missing", "name": "Custom missing", "enabled": true,
+  "trigger": {"type": "custom"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$custom_missing" >"$test_root/custom-missing.out"; then
+  echo "custom trigger without a name unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: custom trigger needs name as a lowercase slug" "$test_root/custom-missing.out"
+
+custom_bad="$test_root/custom-bad.json"
+cat >"$custom_bad" <<'EOF'
+{
+  "schemaVersion": 1, "id": "custom-bad", "name": "Custom bad", "enabled": true,
+  "trigger": {"type": "custom", "name": "Bad_Name"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$custom_bad" >"$test_root/custom-bad.out"; then
+  echo "custom trigger with a bad name unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: custom trigger needs name as a lowercase slug" "$test_root/custom-bad.out"
+
+custom_unknown="$test_root/custom-unknown.json"
+cat >"$custom_unknown" <<'EOF'
+{
+  "schemaVersion": 1, "id": "custom-unknown", "name": "Custom unknown", "enabled": true,
+  "trigger": {"type": "custom", "name": "deploy-done", "extra": true},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$custom_unknown" >"$test_root/custom-unknown.out"; then
+  echo "custom trigger with an unknown field unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: unknown field in .trigger: extra" "$test_root/custom-unknown.out"
+
 lid="$test_root/lid.json"
 cat >"$lid" <<'EOF'
 {

@@ -81,6 +81,42 @@ run_env "$plugin_dir/bin/omaflow-eval" test
 [[ ! -f $state/log.jsonl ]] || ! grep -q '"kind":"run"' "$state/log.jsonl"
 run_env jq -e 'index("HomeWifi") != null' "$state/seen-ssids.json" >/dev/null
 
+cat >"$rules_dir/custom-deploy.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "custom-deploy", "name": "Custom deploy", "enabled": true,
+  "trigger": {"type": "custom", "name": "deploy-done"},
+  "actions": [{"type": "notify", "message": "deployed {{env}}x{{missing}}end"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow" trigger deploy-done env=prod
+grep -q 'omarchy-notification-send.*deployed prodxend' "$calls"
+[[ $(stat -c '%a' "$state/inbox") == 700 ]]
+[[ -z $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit) ]]
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow" trigger another-event env=stage
+! grep -q 'omarchy-notification-send.*deployed' "$calls"
+[[ -z $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit) ]]
+printf '{"name":"deploy-done"}' >"$state/inbox/garbage.json"
+{
+  printf '{"name":"deploy-done","data":{"env":"'
+  head -c 20000 /dev/zero | tr '\0' x
+  printf '"},"at":"now"}'
+} >"$state/inbox/oversize.json"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" test
+! grep -q 'omarchy-notification-send.*deployed' "$calls"
+[[ -z $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit) ]]
+if run_env "$plugin_dir/bin/omaflow" trigger Bad-Name env=prod 2>/dev/null; then
+  echo "bad custom event name unexpectedly accepted" >&2
+  exit 1
+fi
+if run_env "$plugin_dir/bin/omaflow" trigger deploy-done -env=prod 2>/dev/null; then
+  echo "bad custom event data unexpectedly accepted" >&2
+  exit 1
+fi
+[[ -z $(find "$state/inbox" -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit) ]]
+
 # 2. A matching monitor appears: dock-setup fires, disabled-rule does not.
 echo '[{"name":"eDP-1","description":"Laptop Screen"},{"name":"DP-3","description":"Dell U3821DW"}]' >"$TEST_MONITORS"
 run_env "$plugin_dir/bin/omaflow-eval" test
@@ -176,6 +212,19 @@ grep -q 'Content-Type: text/plain' "$calls"
 grep -q -- '--data-raw @/etc/passwd' "$calls"                        # passed as data, not a file ref
 ! grep -q -- '--data-binary' "$calls"                                # never the @-interpreting flag
 run_env jq -e '.status == "ok"' <(grep '"ruleId":"hook-rule"' "$state/log.jsonl" | tail -1) >/dev/null
+
+cat >"$rules_dir/wifi-hook.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "wifi-hook", "name": "WiFi hook", "enabled": true,
+  "trigger": {"type": "wifi-connected", "match": {"ssid": "*"}},
+  "actions": [{"type": "webhook", "endpoint": "team-slack", "message": "WiFi: {{ssid}}/{{missing}}"}],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+echo 'yes:OfficeWifi' >"$TEST_WIFI"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" wifi
+grep -q -- '--data-raw {"text":"WiFi: OfficeWifi/"}' "$calls"
 
 cat >"$rules_dir/bad-hook.json" <<'EOF'
 {

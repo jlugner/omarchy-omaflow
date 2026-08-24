@@ -56,13 +56,14 @@ omaflow author "on battery, enable dnd and dim ambitions"
 omaflow stage show|accept|reject
 omaflow list · run <id> [--dry-run] · enable|disable|delete <id>
 omaflow log · revert <exec-id> · agent [codex|claude|grok|auto] · poke
+omaflow trigger <name> [key=value ...]
 omaflow scripts [list | add <name> <absolute-path> [description] | remove <name>]
 omaflow webhooks [add <name> <url> [format] | remove <name>]
 ```
 
 ## What rules can do
 
-**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery.
+**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · named custom events.
 
 **Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · on a given wifi.
 
@@ -75,7 +76,9 @@ omaflow webhooks add team-slack https://hooks.slack.com/services/… slack
 omaflow webhooks add phone https://ntfy.sh/your-topic ntfy
 ```
 
-Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a default `json` envelope. `{{trigger}}` in a message expands to the firing event.
+Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a default `json` envelope.
+
+Fire a custom event with `omaflow trigger deploy-done env=prod`. Notify and webhook messages can use `{{trigger}}` plus event fields such as `{{env}}`, `{{ssid}}`, `{{name}}`, `{{source}}`, and `{{at}}`. Unknown placeholders become empty strings.
 
 There is no shell action, on purpose. The agent can only emit typed, allowlisted actions, and every rule is validated against your actual machine (the theme exists, the app is installed) at install time and again before every run.
 
@@ -95,7 +98,7 @@ Two packaged scripts, `lock-fingerprint-enable` and `lock-fingerprint-disable`, 
 ## How it works
 
 - Rules are one JSON file each in `~/.config/omaflow/rules/`, portable config that syncs like your dotfiles. Each rule keeps your original request in its `source` field.
-- A small shell service forwards change signals (Hyprland monitor events, UPower lid changes, `nmcli monitor`, power state, and a 45s heartbeat) to `bin/omaflow-eval`, a state-diff engine: it re-reads reality, diffs against its last snapshot, and fires matching rules. Duplicate signals cost nothing. First run stores a baseline and fires nothing.
+- A small shell service forwards change signals (Hyprland monitor events, UPower lid changes, `nmcli monitor`, power state, and a 45s heartbeat) to `bin/omaflow-eval`, a state-diff engine: it re-reads reality, diffs against its last snapshot, and fires matching rules. Duplicate signals cost nothing. First run stores a hardware baseline and fires no hardware events.
 - `bin/omaflow-run` executes actions through existing Omarchy surfaces (`omarchy theme set`, shell IPC, `hyprctl`, `pactl`). Revertible actions are snapshotted first and rolled back after failure. `omaflow revert <exec-id>` rejects runs with nothing revertible and reports mixed reversible/irreversible runs as partial.
 - Authoring hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps, allowed script names), validates the result, and stages it. `stage accept` is the only way into the rules directory.
 - Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > Omarchy's default agent > first installed of codex/claude/grok.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'securerandom'
 
 module Omaflow
   module CLI
@@ -20,6 +21,7 @@ module Omaflow
         omaflow agent [backend]     show or set the authoring backend
         omaflow scripts [add <name> <absolute-path> [description] | remove <name>]
         omaflow webhooks [add <name> <url> [format] | remove <name>]
+        omaflow trigger <name> [key=value ...]
         omaflow vocabulary          list supported trigger/condition/action types
         omaflow poke                run one engine evaluation now
     HELP
@@ -54,6 +56,7 @@ module Omaflow
       when 'agent' then agent(argv.first)
       when 'scripts' then scripts(argv)
       when 'webhooks' then webhooks(argv)
+      when 'trigger' then trigger(argv)
       when 'vocabulary' then vocabulary
       when 'poke' then Evaluator.tick('cli')
       when '-h', '--help', 'help' then puts HELP
@@ -434,6 +437,39 @@ module Omaflow
       Store.write_json(Paths.webhooks_file, hooks)
       puts "Webhook endpoint removed: #{name}"
       0
+    end
+
+    def trigger(argv)
+      name = argv.shift.to_s
+      unless name.match?(Validator::SLUG)
+        warn 'Custom event name must be a lowercase slug'
+        return 2
+      end
+      data = trigger_data(argv)
+      return 2 unless data
+
+      filename = "#{Time.now.strftime('%Y%m%d%H%M%S%6N')}-#{Process.pid}-#{SecureRandom.hex(4)}.json"
+      Store.write_json(File.join(Paths.inbox_dir, filename), { 'name' => name, 'data' => data, 'at' => Sys.now_iso })
+      Evaluator.tick("custom:#{name}")
+    end
+
+    def trigger_data(argv)
+      if argv.size > 10
+        warn 'Custom events accept at most 10 data keys'
+        return nil
+      end
+      argv.each_with_object({}) do |pair, data|
+        key, value = pair.split('=', 2)
+        unless safe_event_string?(key) && safe_event_string?(value) && !data.key?(key)
+          warn 'Custom event data must be unique plain key=value strings'
+          return nil
+        end
+        data[key] = value
+      end
+    end
+
+    def safe_event_string?(value)
+      value.is_a?(String) && value.bytesize.between?(1, 200) && !value.match?(/[[:cntrl:]]/) && !value.start_with?('-')
     end
 
     def vocabulary

@@ -16,7 +16,8 @@ module Omaflow
       'monitor-disconnected' => :check_monitor_trigger,
       'wifi-connected' => :check_wifi_connected_trigger,
       'wifi-disconnected' => :check_wifi_disconnected_trigger,
-      'power-source' => :check_power_trigger
+      'power-source' => :check_power_trigger,
+      'custom' => :check_custom_trigger
     }.freeze
 
     CONDITION_CHECKS = {
@@ -154,6 +155,11 @@ module Omaflow
     def check_power_trigger(trigger)
       err('power-source needs source: ac|battery') unless %w[ac battery].include?(trigger['source'])
       unknown_keys(trigger, %w[type source], '.trigger')
+    end
+
+    def check_custom_trigger(trigger)
+      err('custom trigger needs name as a lowercase slug') unless trigger['name'].is_a?(String) && trigger['name'].match?(SLUG)
+      unknown_keys(trigger, %w[type name], '.trigger')
     end
 
     def check_conditions

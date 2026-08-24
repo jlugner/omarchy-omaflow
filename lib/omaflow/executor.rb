@@ -27,8 +27,8 @@ module Omaflow
       'audio-output' => :snapshot_audio_output
     }.freeze
 
-    def self.run(rule_id, dry_run: false, trigger: 'manual', respect_cooldown: false)
-      locked = Store.with_lock('.run.lock') { return new.execute(rule_id, dry_run:, trigger:, respect_cooldown:) }
+    def self.run(rule_id, dry_run: false, trigger: 'manual', trigger_data: {}, respect_cooldown: false)
+      locked = Store.with_lock('.run.lock') { return new.execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:) }
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
@@ -42,7 +42,7 @@ module Omaflow
       1
     end
 
-    def execute(rule_id, dry_run:, trigger:, respect_cooldown:)
+    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:)
       path = Paths.rule_file(rule_id)
       return self.class.fail_stderr('Invalid rule id') unless path
       return self.class.fail_stderr("No such rule: #{rule_id}") unless File.exist?(path)
@@ -50,6 +50,7 @@ module Omaflow
       @rule = Store.read_json(path, {})
       @rule_id = rule_id
       @trigger_desc = trigger
+      @trigger_data = trigger_data.is_a?(Hash) ? trigger_data : {}
       @exec_id = "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(4)}"
 
       errors, = Validator.new(@rule).validate
@@ -325,7 +326,7 @@ module Omaflow
     end
 
     def apply_webhook(action)
-      message = Sys.subst(action['message'], '{{trigger}}', @trigger_desc)
+      message = template_message(message: action['message'])
       hook = Store.read_json(Paths.webhooks_file, {})[action['endpoint']]
       return ["no webhook endpoint named: #{action['endpoint']}", false] unless hook.is_a?(Hash)
 
@@ -354,10 +355,21 @@ module Omaflow
 
     def apply_notify(action)
       sanitize = ->(text) { text.to_s.gsub(/[[:cntrl:]]/, '').sub(/\A-+/, '') }
-      message = sanitize.call(Sys.subst(action['message'], '{{trigger}}', @trigger_desc))
+      message = sanitize.call(template_message(message: action['message']))
       title = sanitize.call(action.fetch('title', 'Omaflow'))
       Sys.notify(title.empty? ? 'Omaflow' : title, message.empty? ? '·' : message)
       [message, true]
+    end
+
+    def template_message(message:)
+      values = @trigger_data.transform_keys(&:to_s).merge('trigger' => @trigger_desc.to_s)
+      replacements = []
+      rendered = message.scan(/\{\{([^{}]*)\}\}/).flatten.uniq.each_with_index.reduce(message) do |text, (key, index)|
+        token = "\0#{index}\0"
+        replacements << [token, values.fetch(key, '').to_s]
+        Sys.subst(text, "{{#{key}}}", token)
+      end
+      replacements.reduce(rendered) { |text, (token, value)| Sys.subst(text, token, value) }
     end
   end
 end
