@@ -20,8 +20,10 @@ Item {
     return url.indexOf("file://") === 0 ? url.substring(7) : url
   }
   readonly property string evalPath: pluginDir + "bin/omaflow-eval"
+  readonly property string omaflowPath: pluginDir + "bin/omaflow"
 
   property bool evalQueued: false
+  property bool firstTick: true
 
   function poke(reason, immediate) {
     // Coalesce bursts: at most one queued eval at a time; the evaluator
@@ -43,6 +45,11 @@ Item {
       root.evalQueued = false
       Quickshell.execDetached([root.evalPath, reason])
     }
+  }
+
+  Process {
+    id: firstRun
+    command: [root.omaflowPath, "first-run"]
   }
 
   // Immediacy sources -------------------------------------------------------
@@ -108,7 +115,13 @@ Item {
     repeat: true
     running: true
     triggeredOnStart: true
-    onTriggered: root.poke("tick")
+    onTriggered: {
+      root.poke("tick")
+      if (root.firstTick) {
+        root.firstTick = false
+        firstRun.running = true
+      }
+    }
   }
 
   IpcHandler {

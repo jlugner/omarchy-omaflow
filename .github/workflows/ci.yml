@@ -49,5 +49,8 @@ jobs:
       - name: CLI install test
         run: tests/test-install.sh
 
+      - name: Onboarding setup test
+        run: tests/test-setup.sh
+
       - name: Script allowlist test
         run: tests/test-scripts.sh

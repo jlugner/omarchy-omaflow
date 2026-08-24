@@ -16,22 +16,27 @@ Codex, Claude Code, or Grok turns that into a small JSON rule. From then on no A
 
 ## Install
 
+Install Omaflow from the Omarchy plugin manager:
+
 ```bash
 omarchy plugin add https://github.com/jlugner/omarchy-omaflow.git --enable
-~/.config/omarchy/plugins/jesperlugner.omaflow/install.sh
 ```
 
-The second command safely links `omaflow` into `~/.local/bin`. Restart the shell once so the engine starts (`omarchy restart shell`), then bind the inspector in `~/.config/hypr/bindings.lua` and run `hyprctl reload`:
+You can also clone it directly:
 
-```lua
-o.bind(
-  "SUPER + SHIFT + U",
-  "Automations (Omaflow)",
-  "omaflow"
-)
+```bash
+git clone https://github.com/jlugner/omarchy-omaflow.git ~/.config/omarchy/plugins/jesperlugner.omaflow
 ```
 
-To uninstall, remove the keybinding, run `~/.config/omarchy/plugins/jesperlugner.omaflow/install.sh --remove`, then run `omarchy plugin remove jesperlugner.omaflow`. The removal step refuses to touch an `omaflow` command it did not install. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
+Then run setup:
+
+```bash
+~/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow setup
+```
+
+After the CLI link exists, the command is `omaflow setup`.
+
+To uninstall, run `~/.config/omarchy/plugins/jesperlugner.omaflow/install.sh --remove`, delete the omaflow marker blocks from `~/.config/omarchy/extensions/omarchy-menu.jsonc` and your Hyprland bindings file, then run `omarchy plugin remove jesperlugner.omaflow`. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
 
 ## Use
 
@@ -52,6 +57,7 @@ The activity timeline answers "why did my theme just change?" Every firing logs 
 Everything works from the CLI too:
 
 ```bash
+omaflow setup [--yes]
 omaflow author "on battery, enable dnd and dim ambitions"
 omaflow stage show|accept|reject
 omaflow list · run <id> [--dry-run] · enable|disable|delete <id>
@@ -116,6 +122,7 @@ omarchy plugin validate ~/.config/omarchy/plugins/jesperlugner.omaflow
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-author.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-hardening.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-install.sh
+~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-setup.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-scripts.sh
 ```
 

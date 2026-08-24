@@ -9,6 +9,7 @@ module Omaflow
       Omaflow CLI — everything the overlay can do, scriptable.
 
         omaflow                     open the inspector overlay
+        omaflow setup [--yes]       wire the CLI, menu, and optional hotkey
         omaflow list                list rules
         omaflow author "<text>" [--agent codex|claude|grok]
         omaflow stage <accept|reject|show>
@@ -43,6 +44,8 @@ module Omaflow
       command = argv.shift || 'open'
       case command
       when 'open' then open_overlay
+      when 'setup' then Onboarding.setup(argv)
+      when 'first-run' then Onboarding.first_run
       when 'list' then list
       when 'author' then author_command(argv)
       when 'stage' then stage(argv)

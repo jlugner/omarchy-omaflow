@@ -15,7 +15,7 @@ module Omaflow
         raise IOError, "not a regular file: #{path}" unless stat.file?
         raise IOError, "file exceeds #{max_bytes} bytes: #{path}" if stat.size > max_bytes
 
-        file.read(max_bytes).to_s
+        file.read(max_bytes).to_s.force_encoding(Encoding::UTF_8)
       end
     end
 

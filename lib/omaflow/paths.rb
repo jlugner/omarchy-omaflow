@@ -23,6 +23,7 @@ module Omaflow
     def cooldowns_file = File.join(state_dir, 'cooldowns.json')
     def seen_ssids_file = File.join(state_dir, 'seen-ssids.json')
     def staging_file = File.join(state_dir, 'staging.json')
+    def first_run_file = File.join(state_dir, 'first_run_done')
     def snapshots_dir = File.join(state_dir, 'snapshots')
     def inbox_dir = File.join(state_dir, 'inbox')
     def omarchy_default_agent_file = File.join(env_dir('XDG_CONFIG_HOME', '.config'), 'omarchy', 'defaults', 'agent')
