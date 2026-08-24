@@ -232,9 +232,14 @@ module Omaflow
     end
 
     def show_log(count)
-      return 0 unless File.exist?(Paths.log_file)
+      lines = begin
+        Store.safe_read(Paths.log_file, max_bytes: 4_194_304).lines
+      rescue StandardError
+        nil
+      end
+      return 0 unless lines
 
-      File.readlines(Paths.log_file).last((count || 15).to_i).each do |line|
+      lines.last((count || 15).to_i).each do |line|
         entry = Store.parse_json(line, {})
         next if entry.empty?
 

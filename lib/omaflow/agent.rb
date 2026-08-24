@@ -26,7 +26,7 @@ module Omaflow
     def configured = Store.read_json(Paths.config_file, {})['agent']
 
     def omarchy_default
-      File.read(Paths.omarchy_default_agent_file).strip
+      Store.safe_read(Paths.omarchy_default_agent_file, max_bytes: 4096).strip
     rescue StandardError
       nil
     end

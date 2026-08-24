@@ -56,4 +56,40 @@ run_ruby '
   abort "json byte cap missing" unless Omaflow::Store::MAX_JSON_BYTES == 262_144
 '
 
+
+
+# Second review sweep: the log append must not follow a planted symlink, the
+# validator and revert must refuse oversize/symlinked inputs, and log display
+# survives a huge log.
+victim="$test_root/victim.txt"
+: >"$victim"
+run_ruby '
+  Omaflow::Paths.ensure_dirs
+  victim = File.join(Dir.home, "victim.txt")
+  File.delete(Omaflow::Paths.log_file) if File.exist?(Omaflow::Paths.log_file)
+  File.symlink(victim, Omaflow::Paths.log_file)
+  Omaflow::Store.log_append({ "at" => "now", "kind" => "test", "status" => "ok" })
+  abort "append followed the symlink" unless File.empty?(victim)
+  abort "append did not recover to a regular file" unless File.file?(Omaflow::Paths.log_file) && !File.symlink?(Omaflow::Paths.log_file)
+'
+[[ ! -s "$victim" ]]
+
+run_ruby '
+  Omaflow::Paths.ensure_dirs
+  huge = File.join(Omaflow::Paths.snapshots_dir, "huge-snap.json")
+  File.write(huge, "{\"theme\":\"" + ("x" * 300_000) + "\"}")
+  abort "oversize snapshot was accepted" if Omaflow::Executor.new.revert("huge-snap").zero?
+' 2>/dev/null
+
+errors=$(HOME="$test_root" XDG_CONFIG_HOME="$test_root/config" XDG_STATE_HOME="$test_root/state" \
+  PATH="$test_root/bin:/usr/bin:/bin" "$plugin_dir/bin/omaflow" validate "$rules_dir/huge.json" || true)
+grep -q "not a JSON object" <<<"$errors"
+
+run_ruby '
+  Omaflow::Paths.ensure_dirs
+  File.delete(Omaflow::Paths.log_file) if File.exist?(Omaflow::Paths.log_file)
+  File.write(Omaflow::Paths.log_file, ("{\"at\":\"x\"}\n" * 500_000))
+' 
+HOME="$test_root" XDG_CONFIG_HOME="$test_root/config" XDG_STATE_HOME="$test_root/state" \
+  PATH="$test_root/bin:/usr/bin:/bin" timeout 10 "$plugin_dir/bin/omaflow" log 3 >/dev/null
 echo "test-hardening: ok"

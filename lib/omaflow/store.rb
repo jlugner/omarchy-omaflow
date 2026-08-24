@@ -60,7 +60,7 @@ module Omaflow
 
     def with_lock(name, wait: true, timeout: 90)
       Paths.ensure_dirs
-      File.open(File.join(Paths.state_dir, name), File::CREAT | File::WRONLY, 0o644) do |file|
+      File.open(File.join(Paths.state_dir, name), File::CREAT | File::WRONLY | File::NOFOLLOW, 0o644) do |file|
         if wait
           deadline = Time.now + timeout
           until file.flock(File::LOCK_EX | File::LOCK_NB)
@@ -76,9 +76,20 @@ module Omaflow
       end
     end
 
+    def safe_append(path)
+      File.open(path, File::WRONLY | File::CREAT | File::APPEND | File::NOFOLLOW, 0o600) do |file|
+        raise IOError, "not a regular file: #{path}" unless file.stat.file?
+
+        yield file
+      end
+    rescue Errno::ELOOP
+      File.unlink(path)
+      File.open(path, File::WRONLY | File::CREAT | File::APPEND | File::NOFOLLOW, 0o600) { yield it }
+    end
+
     def log_append(entry)
       with_lock('.log.lock') do
-        File.open(Paths.log_file, 'a', 0o600) { it.puts(JSON.generate(entry)) }
+        safe_append(Paths.log_file) { it.puts(JSON.generate(entry)) }
         lines = begin
           safe_read(Paths.log_file, max_bytes: 4_194_304).lines
         rescue StandardError

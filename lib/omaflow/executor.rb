@@ -74,7 +74,7 @@ module Omaflow
       return self.class.fail_stderr("No snapshot for execution: #{exec_id}") unless File.exist?(path)
 
       snapshot = begin
-        parsed = JSON.parse(File.read(path))
+        parsed = JSON.parse(Store.safe_read(path))
         parsed.is_a?(Hash) ? parsed : nil
       rescue StandardError
         nil

@@ -22,18 +22,22 @@ module Omaflow
       nil
     end
 
-    def desktop_name?(path, app)
-      File.foreach(path).any? { it.match?(/\AName=#{Regexp.escape(app)}\s*\z/i) }
+    def desktop_head(path)
+      File.open(path, File::RDONLY | File::NOFOLLOW) { it.read(65_536) }.to_s
+    rescue Errno::ELOOP
+      File.read(path, 65_536).to_s
     rescue StandardError
-      false
+      ''
+    end
+
+    def desktop_name?(path, app)
+      desktop_head(path).lines.any? { it.match?(/\AName=#{Regexp.escape(app)}\s*\z/i) }
     end
 
     def installed_app_names(limit: 150)
       application_dirs.flat_map do |dir|
         Dir.glob(File.join(dir, '*.desktop')).filter_map do |path|
-          File.foreach(path).find { it.start_with?('Name=') }&.delete_prefix('Name=')&.strip
-        rescue StandardError
-          nil
+          desktop_head(path).lines.find { it.start_with?('Name=') }&.delete_prefix('Name=')&.strip
         end
       end.uniq.sort.first(limit)
     end

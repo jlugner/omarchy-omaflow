@@ -40,7 +40,7 @@ module Omaflow
     attr_reader :errors, :warnings
 
     def self.validate_file(path)
-      rule = JSON.parse(File.read(path))
+      rule = JSON.parse(Store.safe_read(path))
       return [['not a JSON object'], []] unless rule.is_a?(Hash)
 
       new(rule).validate

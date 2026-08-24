@@ -71,13 +71,13 @@ module Omaflow
     def probe_on_ac
       power_dir = ENV.fetch('OMAFLOW_POWER_DIR', '/sys/class/power_supply')
       mains = Dir.glob(File.join(power_dir, '*', 'type')).find do |path|
-        File.read(path).strip == 'Mains'
+        File.read(path, 64).to_s.strip == 'Mains'
       rescue StandardError
         false
       end
       return nil unless mains
 
-      online = File.read(File.join(File.dirname(mains), 'online')).strip
+      online = File.read(File.join(File.dirname(mains), 'online'), 64).to_s.strip
       { '1' => true, '0' => false }[online]
     rescue StandardError
       nil
