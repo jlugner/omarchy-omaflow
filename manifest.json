@@ -4,7 +4,7 @@
   "name": "Omaflow",
   "version": "0.4.0",
   "author": "Jesper Lugner",
-  "description": "Agent-authored desktop automations you can inspect, test, and trust",
+  "description": "Centralised desktop automation: docking, wifi, lid, schedules. Every rule is inspectable, testable, and reversible. Describe one in plain English and an agent drafts it. No AI at runtime.",
   "kinds": [
     "service",
     "overlay"
