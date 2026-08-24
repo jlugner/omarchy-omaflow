@@ -26,8 +26,8 @@ Item {
   property bool editorEnabled: true
   property var editorTrigger: ({ type: "manual" })
 
-  readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "wifi-connected", "wifi-disconnected", "power-source"]
-  readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "on-ssid"]
+  readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "custom"]
+  readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-ssid"]
   readonly property var actionTypes: ["theme", "dnd", "nightlight", "stay-awake", "launch", "workspace", "audio-output", "script", "webhook", "notify", "agent"]
   readonly property var weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
   readonly property var agentOps: ["close-window", "focus-window", "move-window-to-workspace", "notify"]
@@ -114,6 +114,7 @@ Item {
     if (type === "interval") return { type: type, minutes: 60 }
     if (type === "monitor-connected" || type === "monitor-disconnected")
       return { type: type, match: { description: "" } }
+    if (type === "app-opened" || type === "app-closed") return { type: type, match: { class: "" } }
     if (type === "wifi-connected") return { type: type, match: { ssid: "*" } }
     if (type === "power-source") return { type: type, source: "ac" }
     if (type === "custom") return { type: type, name: "" }
@@ -223,6 +224,10 @@ Item {
       else if (condition.type === "on-power") condition.choice = String(conditions[i].source || "ac")
       else if (condition.type === "lid-state") condition.choice = String(conditions[i].state || "open")
       else if (condition.type === "monitor-present") condition.first = String((conditions[i].match || {}).description || (conditions[i].match || {}).name || "")
+      else if (condition.type === "app-running") {
+        condition.first = String((conditions[i].match || {}).class || "")
+        condition.second = String((conditions[i].match || {}).title || "")
+      }
       else if (condition.type === "on-ssid") condition.first = String(conditions[i].ssid || "")
       editorConditions.append(condition)
     }
@@ -255,6 +260,10 @@ Item {
     if (condition.type === "on-power") return { type: condition.type, source: condition.choice }
     if (condition.type === "lid-state") return { type: condition.type, state: condition.choice }
     if (condition.type === "monitor-present") return { type: condition.type, match: { description: condition.first } }
+    if (condition.type === "app-running") {
+      var match = String(condition.first || "").trim() !== "" ? { class: condition.first } : { title: condition.second }
+      return { type: condition.type, match: match }
+    }
     return { type: condition.type, ssid: condition.first }
   }
 
@@ -396,9 +405,11 @@ Item {
     if (t.days) when += " on " + t.days.join(", ")
     if (t.match) {
       if (t.match.description || t.match.name) when += ": " + (t.match.description || t.match.name)
+      if (t.match.class || t.match.title) when += ": " + (t.match.class || t.match.title)
       if (t.match.ssid) when += ": " + t.match.ssid
       if (t.match.known === false) when += ": a network never seen before"
     }
+    if (t.name) when += ": " + t.name
     if (t.source) when += ": " + t.source
     lines.push("When   " + when)
     var conds = rule.conditions || []
@@ -409,7 +420,7 @@ Item {
       if (cond.days) text += " " + cond.days.join(", ")
       if (cond.source) text += " " + cond.source
       if (cond.ssid) text += " " + cond.ssid
-      if (cond.match) text += " " + (cond.match.description || cond.match.name || "")
+      if (cond.match) text += " " + (cond.match.description || cond.match.name || cond.match.class || cond.match.title || "")
       lines.push("Only if  " + text)
     }
     var actions = rule.actions || []
@@ -1057,7 +1068,9 @@ Item {
                         : root.editorTrigger.type === "wifi-connected" && (root.editorTrigger.match || {}).known === false ? "unknown"
                         : root.editorTrigger.type === "wifi-connected" ? String((root.editorTrigger.match || {}).ssid || "")
                         : String((root.editorTrigger.match || {}).description || "")
-                      placeholder: root.editorTrigger.type === "wifi-connected" ? "SSID, *, or unknown" : "name or description"
+                      placeholder: root.editorTrigger.type === "wifi-connected" ? "SSID, *, or unknown"
+                        : root.editorTrigger.type === "custom" ? "event name"
+                        : "name or description"
                       onTextChanged: {
                         if (root.editorTrigger.type !== "custom" && root.editorTrigger.type !== "wifi-connected"
                             && root.editorTrigger.type !== "monitor-connected" && root.editorTrigger.type !== "monitor-disconnected") return
@@ -1066,6 +1079,68 @@ Item {
                         else if (trigger.type === "wifi-connected") trigger.match = text === "unknown" ? { known: false } : { ssid: text }
                         else trigger.match = { description: text }
                         root.editorTrigger = trigger
+                      }
+                    }
+                  }
+
+                  Column {
+                    width: parent.width
+                    spacing: Style.spacing.sm
+                    visible: root.editorTrigger.type === "app-opened" || root.editorTrigger.type === "app-closed"
+
+                    Row {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+
+                      Text {
+                        width: Style.space(70)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "class"
+                        color: root.foreground
+                        opacity: 0.55
+                        font.family: Style.font.menuFamily
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      EditorField {
+                        width: parent.width - Style.space(70) - parent.spacing
+                        text: String((root.editorTrigger.match || {}).class || "")
+                        placeholder: "class match"
+                        onTextChanged: {
+                          if (root.editorTrigger.type !== "app-opened" && root.editorTrigger.type !== "app-closed") return
+                          var trigger = root.clone(root.editorTrigger)
+                          if (String((trigger.match || {}).class || "") === text) return
+                          trigger.match = { class: text }
+                          root.editorTrigger = trigger
+                        }
+                      }
+                    }
+
+                    Row {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+
+                      Text {
+                        width: Style.space(70)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "title"
+                        color: root.foreground
+                        opacity: 0.55
+                        font.family: Style.font.menuFamily
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      EditorField {
+                        width: parent.width - Style.space(70) - parent.spacing
+                        text: String((root.editorTrigger.match || {}).title || "")
+                        placeholder: "title match"
+                        onTextChanged: {
+                          if (root.editorTrigger.type !== "app-opened" && root.editorTrigger.type !== "app-closed") return
+                          var trigger = root.clone(root.editorTrigger)
+                          if (String((trigger.match || {}).title || "") === text) return
+                          trigger.match = { title: text }
+                          root.editorTrigger = trigger
+                        }
                       }
                     }
                   }
@@ -1224,6 +1299,64 @@ Item {
                       text: String(model.first || "")
                       placeholder: model.type === "on-ssid" ? "SSID match" : "monitor name or description"
                       onTextChanged: editorConditions.setProperty(conditionNode.index, "first", text)
+                    }
+
+                    Column {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+                      visible: model.type === "app-running"
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        Text {
+                          width: Style.space(70)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "class"
+                          color: root.foreground
+                          opacity: 0.55
+                          font.family: Style.font.menuFamily
+                          font.pixelSize: Style.font.caption
+                        }
+
+                        EditorField {
+                          width: parent.width - Style.space(70) - parent.spacing
+                          text: String(model.first || "")
+                          placeholder: "class match"
+                          onTextChanged: {
+                            if (model.type !== "app-running" || String(model.first || "") === text) return
+                            editorConditions.setProperty(conditionNode.index, "first", text)
+                            if (String(text).trim() !== "") editorConditions.setProperty(conditionNode.index, "second", "")
+                          }
+                        }
+                      }
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        Text {
+                          width: Style.space(70)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "title"
+                          color: root.foreground
+                          opacity: 0.55
+                          font.family: Style.font.menuFamily
+                          font.pixelSize: Style.font.caption
+                        }
+
+                        EditorField {
+                          width: parent.width - Style.space(70) - parent.spacing
+                          text: String(model.second || "")
+                          placeholder: "title match"
+                          onTextChanged: {
+                            if (model.type !== "app-running" || String(model.second || "") === text) return
+                            editorConditions.setProperty(conditionNode.index, "second", text)
+                            if (String(text).trim() !== "") editorConditions.setProperty(conditionNode.index, "first", "")
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -1460,6 +1593,13 @@ Item {
                               onToggled: editorActions.setProperty(actionDelegate.index, "selected", root.toggleWord(actionDelegate.selectedWords, modelData))
                             }
                           }
+                        }
+
+                        EditorField {
+                          width: parent.width
+                          text: String(model.number || "")
+                          placeholder: "timeoutSeconds (optional)"
+                          onTextChanged: editorActions.setProperty(actionDelegate.index, "number", text)
                         }
                       }
                     }
