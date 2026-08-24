@@ -22,6 +22,8 @@ SH
 chmod +x "$fake_bin/hyprctl" "$fake_bin/notify-send"
 test_path="$fake_bin:/usr/bin:/bin"
 
+same_file_content() { [ "$(md5sum < "$1")" = "$(md5sum < "$2")" ]; }
+
 run_cli() {
   local test_home=$1
   shift
@@ -48,8 +50,8 @@ grep -Fq 'bindd = SUPER SHIFT, U, Toggle Omaflow, exec, omarchy-shell shell togg
 cp "$menu_file" "$test_root/menu-before"
 cp "$bindings_file" "$test_root/bindings-before"
 run_cli "$setup_home" setup --yes >/dev/null
-cmp "$test_root/menu-before" "$menu_file"
-cmp "$test_root/bindings-before" "$bindings_file"
+same_file_content "$test_root/menu-before" "$menu_file"
+same_file_content "$test_root/bindings-before" "$bindings_file"
 [[ $(grep -c '// omaflow:begin' "$menu_file") == 1 ]]
 [[ $(grep -c '# omaflow:begin' "$bindings_file") == 1 ]]
 
@@ -66,10 +68,10 @@ grep -Fq -- '-- omaflow:end' "$lua_bindings"
 grep -Fq '  "SUPER + SHIFT + U",' "$lua_bindings"
 grep -Fq '  "Automations (Omaflow)",' "$lua_bindings"
 grep -Fq '  "$HOME/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow"' "$lua_bindings"
-cmp "$test_root/lua-conf-before" "$lua_conf"
+same_file_content "$test_root/lua-conf-before" "$lua_conf"
 cp "$lua_bindings" "$test_root/lua-before"
 run_cli "$lua_home" setup --yes >/dev/null
-cmp "$test_root/lua-before" "$lua_bindings"
+same_file_content "$test_root/lua-before" "$lua_bindings"
 [[ $(grep -c -- '-- omaflow:begin' "$lua_bindings") == 1 ]]
 
 foreign_home="$test_root/foreign-home"
@@ -177,7 +179,7 @@ if run_cli "$invalid_home" setup --yes >"$test_root/invalid.out" 2>&1; then
   exit 1
 fi
 grep -q 'needs manual attention' "$test_root/invalid.out"
-cmp "$test_root/invalid-original" "$invalid_menu"
+same_file_content "$test_root/invalid-original" "$invalid_menu"
 
 lone_home="$test_root/lone-home"
 lone_menu="$lone_home/.config/omarchy/extensions/omarchy-menu.jsonc"
@@ -189,7 +191,7 @@ if run_cli "$lone_home" setup --yes >"$test_root/lone.out" 2>&1; then
   exit 1
 fi
 grep -q 'needs manual attention' "$test_root/lone.out"
-cmp "$test_root/lone-original" "$lone_menu"
+same_file_content "$test_root/lone-original" "$lone_menu"
 
 non_tty_home="$test_root/non-tty-home"
 if run_cli "$non_tty_home" setup </dev/null >"$test_root/non-tty.out" 2>&1; then
