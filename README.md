@@ -63,9 +63,7 @@ omaflow log · revert <exec-id> · agent [codex|claude|grok|auto] · poke
 
 **Conditions:** time window · weekday · on AC/battery · monitor present · on a given wifi.
 
-**Actions:** set theme · DND on/off · nightlight on/off · stay-awake on/off · launch app (optionally on a workspace) · switch workspace · set audio output · send a notification · **message a Grok bot**.
-
-The `grok-message` action targets **Grok CLI sessions** (not xAI's Grok Bot teammates product, which currently has no public send API — reach those through a channel their routines watch, like Slack or email triggers). It sends one-way messages to persistent, named sessions — *"whenever I switch to battery, tell my bot sentry"*. Each bot is a durable conversation: the first send creates it, later sends continue it, and `{{trigger}}` in the message expands to the firing event. Sends run tool-less (`--tools ""`), so bots never get access to this machine. `omaflow bots` lists your bots with the `grok --resume <id>` command to chat with any of them directly — the bot has the full history of everything your desktop ever told it.
+**Actions:** set theme · DND on/off · nightlight on/off · stay-awake on/off · launch app (optionally on a workspace) · switch workspace · set audio output · send a notification.
 
 There is deliberately **no shell action**: the agent can only emit typed, allowlisted actions, and `omaflow-validate` gates every rule — schema-checked and referentially checked against your machine (the theme exists, the app has a desktop entry) — both at install time and again before every run.
 

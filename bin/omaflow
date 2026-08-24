@@ -13,7 +13,6 @@
 #   omaflow log [n]
 #   omaflow validate <file|id>
 #   omaflow agent [backend]     show or set the authoring backend
-#   omaflow bots                list grok bots and how to open them
 #   omaflow poke                run one engine evaluation now
 
 set -euo pipefail
@@ -141,13 +140,6 @@ agent)
     mv "$OMAFLOW_CONFIG_FILE.tmp" "$OMAFLOW_CONFIG_FILE"
     echo "Authoring agent set to: $backend"
   fi
-  ;;
-bots)
-  if [[ ! -f $OMAFLOW_BOTS_FILE ]]; then
-    echo "No grok bots yet. A grok-message action creates its bot on first send."
-    exit 0
-  fi
-  jq -r 'to_entries[] | "\(.key)  ·  created \(.value.createdAt)\n  chat with it:  grok --resume \(.value.sessionId)"' "$OMAFLOW_BOTS_FILE"
   ;;
 poke)
   exec "$bin_dir/omaflow-eval" cli

@@ -167,13 +167,6 @@ while IFS= read -r action; do
       fi
     fi
     ;;
-  grok-message)
-    acheck '.bot | type == "string" and test("^[a-z0-9][a-z0-9-]{0,30}$")' || err "grok-message needs bot as a short lowercase slug"
-    acheck '.message | type == "string" and length > 0 and length <= 400 and (explode | all(. >= 32)) and (startswith("-") | not)' ||
-      err "grok-message needs a plain-string message (max 400, no leading dash or control chars)"
-    akeys_ok '["type","bot","message"]'
-    command -v grok >/dev/null || warn "grok CLI is not installed; grok-message actions will fail at run time"
-    ;;
   notify)
     # Notification fields reach notify-send argv; a leading dash could smuggle
     # options (e.g. a click-exec hint), so they are held to safe strings.

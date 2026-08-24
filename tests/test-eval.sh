@@ -137,38 +137,7 @@ TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" test
 ! grep -q 'omarchy-notification-send.*undocked' "$calls"
 run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null
 
-# 8. grok-message: first send creates a UUID bot session (-s) tool-less,
-#    later sends resume it (--resume), and {{trigger}} is substituted.
-cat >"$fake_bin/grok" <<'EOF'
-#!/bin/bash
-echo "grok $*" >>"$TEST_CALLS"
-echo "ack from bot"
-EOF
-chmod +x "$fake_bin/grok"
-export TEST_CALLS="$calls"
-cat >"$rules_dir/bot-rule.json" <<'EOF'
-{
-  "schemaVersion": 1, "id": "bot-rule", "name": "Tell sentry", "enabled": true,
-  "trigger": {"type": "manual"},
-  "actions": [{"type": "grok-message", "bot": "sentry", "message": "Desktop event: {{trigger}}"}],
-  "cooldownSeconds": 0, "source": "test"
-}
-EOF
-: >"$calls"
-run_env "$plugin_dir/bin/omaflow-run" bot-rule --trigger "wifi-connected ssid=TestCafe"
-grep -q -- '-p Desktop event: wifi-connected ssid=TestCafe' "$calls"
-grep -q -- '--tools ' "$calls"
-grep -q -- ' -s [0-9a-f-]\{36\}' "$calls"
-sid=$(jq -r '.sentry.sessionId' "$state/bots.json")
-[[ ${#sid} == 36 ]]
-run_env jq -e '.status == "ok" and (.actions[0].detail | test("ack from bot"))' \
-  <(grep '"ruleId":"bot-rule"' "$state/log.jsonl" | tail -1) >/dev/null
-: >"$calls"
-run_env "$plugin_dir/bin/omaflow-run" bot-rule --trigger "second"
-grep -q -- "--resume $sid" "$calls"
-! grep -q -- ' -s ' "$calls"
-
-# 9. Corrupt domain state quarantines and re-baselines instead of stalling.
+# 8. Corrupt domain state quarantines and re-baselines instead of stalling.
 echo 'not json' >"$state/domains.json"
 run_env "$plugin_dir/bin/omaflow-eval" test
 run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null
