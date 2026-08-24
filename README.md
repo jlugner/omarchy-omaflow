@@ -1,21 +1,17 @@
 # Omaflow
 
-Agent-authored desktop automations for [Omarchy](https://omarchy.org) — described in English, compiled once into inspectable rules, executed deterministically forever.
-
-The aim is **Apple Shortcuts, for Omarchy** — with one twist: you don't assemble flows in a drag-and-drop editor. You tell your agent what you want, and review what it built.
+Apple Shortcuts, for [Omarchy](https://omarchy.org). Except you don't build the flows. You describe them, an agent writes the rule, and you review it before anything runs.
 
 > "When I dock my ultrawide on weekday mornings, switch to my work theme and open Slack on workspace 3."
 
-Your agent (Codex, Claude Code, or Grok) compiles that into a small, validated JSON rule. Omaflow shows you exactly what it will do before you install it, then runs it with no model in the loop: instant, offline, and identical every time. Every automation lives in one inspectable place — browse them, dry-run them, read the "why did that happen" timeline, disable or delete them cleanly.
+Codex, Claude Code, or Grok turns that into a small JSON rule. From then on no AI is involved: a tiny engine runs the rule instantly, offline, the same way every time. All your automations live in one place. Browse them, dry-run them, disable them, and read the timeline that explains every firing. Rules are plain files, so you can inspect, test, and move them to another machine without ever reopening an agent.
 
-**The test Omaflow holds itself to:** you can inspect, test, disable, roll back, and move any automation to another machine — without reopening an agent.
-
-![The Omaflow inspector: rules with live status and the activity timeline that explains every firing](preview.jpg)
+![The Omaflow inspector: rules with live status and the activity timeline](preview.jpg)
 
 ## Requirements
 
 - Omarchy 4 with `omarchy-shell`
-- One agent CLI for authoring: [Codex](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code), or Grok — signed in. (Only used to *compile* rules; never at trigger time.)
+- One agent CLI, signed in: [Codex](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code), or Grok. Used to write rules, never to run them.
 - `jq`, `hyprctl`, `nmcli`, `pactl` (all on stock Omarchy)
 
 ## Install
@@ -24,7 +20,7 @@ Your agent (Codex, Claude Code, or Grok) compiles that into a small, validated J
 omarchy plugin add https://github.com/jlugner/omarchy-omaflow.git --enable
 ```
 
-Restart the shell once so the engine service mounts (`omarchy-restart-shell`), then bind the inspector in `~/.config/hypr/bindings.lua` and run `hyprctl reload`:
+Restart the shell once so the engine starts (`omarchy-restart-shell`), then bind the inspector in `~/.config/hypr/bindings.lua` and run `hyprctl reload`:
 
 ```lua
 o.bind(
@@ -34,25 +30,25 @@ o.bind(
 )
 ```
 
-To uninstall: remove the keybinding, `omarchy plugin remove jesperlugner.omaflow`. Your rules stay in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
+To uninstall, remove the keybinding and run `omarchy plugin remove jesperlugner.omaflow`. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
 
 ## Use
 
-Open the inspector and describe an automation. The agent compiles it, and a preview card shows the exact trigger, conditions, and actions — `Return` installs it, `Esc` discards it. Nothing runs that you haven't read.
+Open the inspector and describe an automation. A preview shows the exact trigger, conditions, and actions. `Return` installs it, `Esc` throws it away. Nothing runs that you haven't read.
 
 | Key | Action |
 |-----|--------|
-| `Return` | Compile the description — or install the previewed rule |
+| `Return` | Compile the description, or install the previewed rule |
 | `Alt+Return` | Run the selected rule now |
-| `Ctrl+Return` | Dry-run: log exactly what would execute |
-| `Ctrl+E` | Enable / disable the selected rule |
-| `Alt+Delete` | Delete it (confirmed) |
+| `Ctrl+Return` | Dry-run: log what would execute |
+| `Ctrl+E` | Enable / disable |
+| `Alt+Delete` | Delete (confirmed) |
 | `Up` / `Down` | Move the selection |
 | `Esc` | Discard preview / clear / close |
 
-The **Recent activity** timeline answers "why did my theme just change?" — every firing records which trigger matched and which actions ran.
+The activity timeline answers "why did my theme just change?" Every firing logs which trigger matched and what ran.
 
-Everything is also a CLI:
+Everything works from the CLI too:
 
 ```bash
 omaflow author "on battery, enable dnd and dim ambitions"
@@ -62,34 +58,34 @@ omaflow log · revert <exec-id> · agent [codex|claude|grok|auto] · poke
 omaflow webhooks [add <name> <url> [format] | remove <name>]
 ```
 
-## What rules can do (v0.2)
+## What rules can do
 
-**Triggers:** manual · time of day (+ weekdays) · monitor connected/disconnected · wifi connected (by name, any, or *never seen before*) / disconnected · switched to AC/battery.
+**Triggers:** manual · time of day (+ weekdays) · monitor connected/disconnected · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery.
 
 **Conditions:** time window · weekday · on AC/battery · monitor present · on a given wifi.
 
-**Actions:** set theme · DND on/off · nightlight on/off · stay-awake on/off · launch app (optionally on a workspace) · switch workspace · set audio output · send a notification · **post to a webhook**.
+**Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · send a notification · post to a webhook.
 
-Webhooks reach anything with an inbox — Slack, Discord, [ntfy](https://ntfy.sh) to your phone, Home Assistant, or an AI teammate watching a channel. Rules never contain URLs: they reference **named endpoints** you configure by hand, so an automation can only ever send where you've explicitly allowed —
+Webhooks reach anything with an inbox: Slack, Discord, [ntfy](https://ntfy.sh) on your phone, Home Assistant. Rules never contain URLs. They point at named endpoints you add yourself, so a rule can only send where you've allowed:
 
 ```bash
 omaflow webhooks add team-slack https://hooks.slack.com/services/… slack
 omaflow webhooks add phone https://ntfy.sh/your-topic ntfy
 ```
 
-Formats shape the body per target (`slack`, `discord`, `ntfy`, `raw`, or the default `json` envelope with message, rule, trigger, and timestamp). `{{trigger}}` in the message expands to the firing event: *"when I join the office wifi, post 'Jesper is in — {{trigger}}' to team-slack."*
+Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a default `json` envelope. `{{trigger}}` in a message expands to the firing event.
 
-There is deliberately **no shell action**: the agent can only emit typed, allowlisted actions, and `omaflow-validate` gates every rule — schema-checked and referentially checked against your machine (the theme exists, the app has a desktop entry) — both at install time and again before every run.
+There is no shell action, on purpose. The agent can only emit typed, allowlisted actions, and every rule is validated against your actual machine (the theme exists, the app is installed) at install time and again before every run.
 
 ## How it works
 
-- Rules are one JSON file each in `~/.config/omaflow/rules/` — portable config that syncs like your dotfiles. Each rule keeps the original English request in its `source` field.
-- A small shell service forwards change signals (Hyprland monitor events, `nmcli monitor`, power state, a 45s heartbeat) to `bin/omaflow-eval` — a pure state-diff engine: it re-reads reality, diffs against its last snapshot, derives events, and fires matching rules. Redundant signals are free; the heartbeat caps worst-case latency even if a signal source dies. First run stores a baseline and fires nothing.
-- `bin/omaflow-run` executes actions through existing Omarchy surfaces (`omarchy theme set`, shell IPC for DND/nightlight/idle, `hyprctl`, `pactl`). Revertible actions (theme, DND, nightlight, stay-awake, audio) are snapshotted first; a failed action rolls the applied ones back, and `omaflow revert <exec-id>` restores any run by hand.
-- Authoring (`bin/omaflow-author`) hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps), validates the result, retries once with the validator's errors on failure, and stages it — `stage accept` is the only path into the rules directory.
-- Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > **Omarchy's default agent** (`omarchy-default-agent`) > first installed of codex/claude/grok.
+- Rules are one JSON file each in `~/.config/omaflow/rules/`, portable config that syncs like your dotfiles. Each rule keeps your original request in its `source` field.
+- A small shell service forwards change signals (Hyprland monitor events, `nmcli monitor`, power state, a 45s heartbeat) to `bin/omaflow-eval`, a state-diff engine: it re-reads reality, diffs against its last snapshot, and fires matching rules. Duplicate signals cost nothing. First run stores a baseline and fires nothing.
+- `bin/omaflow-run` executes actions through existing Omarchy surfaces (`omarchy theme set`, shell IPC, `hyprctl`, `pactl`). Revertible actions are snapshotted first; a failed action rolls the applied ones back, and `omaflow revert <exec-id>` restores any run by hand.
+- Authoring hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps), validates the result, and stages it. `stage accept` is the only way into the rules directory.
+- Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > Omarchy's default agent > first installed of codex/claude/grok.
 
-Nothing leaves your machine at trigger time — except what a `webhook` action posts, and only to endpoints you added yourself. Authoring sends your description and the inventory lists above to your chosen agent, only when you ask — with the agent's tools, MCP servers, and web access disabled as far as each CLI allows (`codex --sandbox read-only`, `claude --strict-mcp-config --disallowedTools …`, `grok --tools "" --disable-web-search`) and a hard timeout. The validator additionally rejects option-shaped strings (leading dashes, control characters) in every field that reaches a command line, so a prompt-injected rule can't smuggle flags — for example into notification exec hints.
+Nothing leaves your machine at trigger time, except what a webhook action posts to endpoints you added. Authoring sends your description and the inventory above to your agent, with tools, MCP servers, and web access turned off as far as each CLI allows, plus a hard timeout. The validator also rejects option-shaped strings (leading dashes, control characters) in any field that reaches a command line.
 
 ## Verify
 
@@ -100,7 +96,7 @@ omarchy plugin validate ~/.config/omarchy/plugins/jesperlugner.omaflow
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-author.sh
 ```
 
-The same checks run in CI on every push. Tests fake every system surface (including the agent), so they run anywhere.
+The same checks run in CI on every push. Tests fake every system surface, including the agent, so they run anywhere.
 
 ## License
 
