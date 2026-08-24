@@ -5,6 +5,8 @@ module Omaflow
     INBOX_LIMIT = 20
     EVENT_DATA_LIMIT = 10
     EVENT_BYTES_LIMIT = 16_384
+    WINDOW_LIMIT = 100
+    WINDOW_EVENT_LIMIT = 10
 
     def self.tick(reason = 'tick')
       Store.with_lock('.eval.lock', wait: false) { new(reason).tick }
@@ -99,6 +101,8 @@ module Omaflow
       probes = { 'minute' => @minute }
       monitors = probe_monitors
       probes['monitors'] = monitors if monitors
+      windows = probe_windows
+      probes['windows'] = windows if windows
       ssid = probe_ssid
       probes['ssid'] = ssid if ssid
       on_ac = probe_on_ac
@@ -118,6 +122,22 @@ module Omaflow
       return nil unless parsed.is_a?(Array)
 
       parsed.map { { 'name' => it['name'], 'description' => it['description'] } }
+    end
+
+    def probe_windows
+      output, ok = Sys.capture('hyprctl', 'clients', '-j')
+      parsed = begin
+        JSON.parse(output) if ok
+      rescue StandardError
+        nil
+      end
+      return nil unless parsed.is_a?(Array) && parsed.all?(Hash)
+
+      parsed.first(WINDOW_LIMIT).map do |window|
+        { 'address' => window['address'], 'class' => window['class'].to_s[0, 120], 'title' => window['title'].to_s[0, 120] }
+      end
+    rescue StandardError
+      nil
     end
 
     def probe_ssid
@@ -170,7 +190,7 @@ module Omaflow
     def domain_fresh?(key) = @previous.key?(key) && @probes.key?(key)
 
     def derive_events
-      [*monitor_events, *wifi_events, *power_events, *lid_events, *time_events]
+      [*monitor_events, *window_events, *wifi_events, *power_events, *lid_events, *time_events]
     end
 
     def monitor_events
@@ -183,6 +203,19 @@ module Omaflow
       added.map { { 'type' => 'monitor-connected', 'data' => it } } +
         removed.map { { 'type' => 'monitor-disconnected', 'data' => it } }
     end
+
+    def window_events
+      return [] unless domain_fresh?('windows')
+
+      previous_addresses = @previous['windows'].map { it['address'] }
+      current_addresses = @current['windows'].map { it['address'] }
+      added = @current['windows'].reject { previous_addresses.include?(it['address']) }
+      removed = @previous['windows'].reject { current_addresses.include?(it['address']) }
+      (added.map { { 'type' => 'app-opened', 'data' => window_event_data(it) } } +
+        removed.map { { 'type' => 'app-closed', 'data' => window_event_data(it) } }).first(WINDOW_EVENT_LIMIT)
+    end
+
+    def window_event_data(window) = { 'class' => window['class'], 'title' => window['title'] }
 
     def wifi_events
       return [] unless domain_fresh?('ssid')
@@ -250,6 +283,9 @@ module Omaflow
       when 'monitor-connected', 'monitor-disconnected'
         target = (trigger.dig('match', 'description') || trigger.dig('match', 'name')).to_s.downcase
         "#{data['description']} #{data['name']}".downcase.include?(target)
+      when 'app-opened', 'app-closed'
+        target = (trigger.dig('match', 'class') || trigger.dig('match', 'title')).to_s.downcase
+        "#{data['class']} #{data['title']}".downcase.include?(target)
       when 'wifi-connected'
         match = trigger['match'] || {}
         if match['known'] == false then data['known'] == false
@@ -282,6 +318,7 @@ module Omaflow
       when 'on-power' then (condition['source'] == 'ac') == @current.fetch('onAc', true)
       when 'lid-state' then lid_state?(condition['state'])
       when 'monitor-present' then monitor_present?(condition)
+      when 'app-running' then app_running?(condition)
       when 'on-ssid' then @current['ssid'].to_s.downcase.include?(condition['ssid'].to_s.downcase)
       else false
       end
@@ -298,6 +335,13 @@ module Omaflow
     def monitor_present?(condition)
       target = (condition.dig('match', 'description') || condition.dig('match', 'name')).to_s.downcase
       @current.fetch('monitors', []).any? { "#{it['description']} #{it['name']}".downcase.include?(target) }
+    end
+
+    def app_running?(condition)
+      return false unless @probes.key?('windows')
+
+      target = (condition.dig('match', 'class') || condition.dig('match', 'title')).to_s.downcase
+      @current['windows'].any? { "#{it['class']} #{it['title']}".downcase.include?(target) }
     end
 
     def lid_state?(state)

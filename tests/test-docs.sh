@@ -18,6 +18,8 @@ trigger lid-opened
 trigger lid-closed
 trigger monitor-connected
 trigger monitor-disconnected
+trigger app-opened
+trigger app-closed
 trigger wifi-connected
 trigger wifi-disconnected
 trigger power-source
@@ -27,6 +29,7 @@ condition weekday
 condition on-power
 condition lid-state
 condition monitor-present
+condition app-running
 condition on-ssid
 action theme
 action dnd

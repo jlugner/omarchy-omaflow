@@ -20,7 +20,7 @@ make_fake() {
   printf '#!/bin/bash\necho "%s $*" >>"%s"\n%s\n' "$name" "$calls" "$body" >"$fake_bin/$name"
   chmod +x "$fake_bin/$name"
 }
-make_fake hyprctl 'if [[ -n ${TEST_HYPRCTL_FAIL:-} ]]; then exit 1; fi; if [[ $1 == monitors ]]; then cat "$TEST_MONITORS"; fi'
+make_fake hyprctl 'if [[ -n ${TEST_HYPRCTL_FAIL:-} ]]; then exit 1; fi; if [[ $1 == monitors ]]; then cat "$TEST_MONITORS"; elif [[ $1 == clients ]]; then cat "$TEST_CLIENTS"; fi'
 make_fake nmcli 'if [[ $1 == -t ]]; then cat "$TEST_WIFI"; fi'
 make_fake omarchy 'if [[ $1 == theme && $2 == current ]]; then echo old-theme; elif [[ $1 == theme && $2 == list ]]; then printf "old-theme\nwork-theme\nbroken-theme\n"; fi'
 make_fake omarchy-shell 'case "$2" in dndState) echo off ;; status) echo "{\"stayAwake\":false}" ;; fingerprintControlAvailable) echo true ;; *) echo ok ;; esac'
@@ -29,8 +29,10 @@ make_fake omarchy-notification-send 'true'
 make_fake gtk-launch 'true'
 
 export TEST_MONITORS="$test_root/monitors.json"
+export TEST_CLIENTS="$test_root/clients.json"
 export TEST_WIFI="$test_root/wifi.txt"
 echo '[{"name":"eDP-1","description":"Laptop Screen"}]' >"$TEST_MONITORS"
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
 echo 'yes:HomeWifi' >"$TEST_WIFI"
 echo Mains >"$test_root/power/AC/type"
 echo 1 >"$test_root/power/AC/online"
@@ -450,5 +452,86 @@ XDG_STATE_HOME="" XDG_CONFIG_HOME="" HOME="$test_root" /usr/bin/ruby -r "$plugin
   abort "empty XDG_CONFIG_HOME resolved to #{Omaflow::Paths.config_dir}" unless
     Omaflow::Paths.config_dir == File.join(Dir.home, ".config", "omaflow")
 '
+
+cat >"$rules_dir/app-opened.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "app-opened", "name": "App opened", "enabled": true,
+  "trigger": {"type": "app-opened", "match": {"class": "SLACK"}},
+  "actions": [{"type": "notify", "message": "opened {{class}} {{title}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/app-closed.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "app-closed", "name": "App closed", "enabled": true,
+  "trigger": {"type": "app-closed", "match": {"title": "team chat"}},
+  "actions": [{"type": "notify", "message": "closed {{class}} {{title}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"},{"address":"0x2","class":"com.slack.Slack","title":"Team Chat"}]' >"$TEST_CLIENTS"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" windows
+grep -q 'omarchy-notification-send.*opened com.slack.Slack Team Chat' "$calls"
+run_env jq -e '.windows | length == 2' "$state/domains.json" >/dev/null
+
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
+: >"$calls"
+TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" windows
+! grep -q 'omarchy-notification-send.*closed' "$calls"
+run_env jq -e '.windows | length == 2 and .[1].title == "Team Chat"' "$state/domains.json" >/dev/null
+run_env "$plugin_dir/bin/omaflow-eval" windows
+grep -q 'omarchy-notification-send.*closed com.slack.Slack Team Chat' "$calls"
+
+cat >"$rules_dir/window-storm.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "window-storm", "name": "Window storm", "enabled": true,
+  "trigger": {"type": "app-opened", "match": {"class": "storm"}},
+  "actions": [{"type": "notify", "message": "storm {{title}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+{
+  printf '[{"address":"0x1","class":"kitty","title":"Terminal"}'
+  long_title=$(printf 'x%.0s' {1..130})
+  for number in $(seq 1 105); do
+    title="Storm $number"
+    [[ $number == 1 ]] && title=$long_title
+    printf ',{"address":"0xstorm%s","class":"storm-app","title":"%s"}' "$number" "$title"
+  done
+  printf ']\n'
+} >"$TEST_CLIENTS"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" windows
+storm_count=$(grep -c 'omarchy-notification-send.*storm' "$calls" || true)
+[[ $storm_count == 10 ]]
+run_env jq -e '.windows | length == 100 and (.[1].title | length) == 120' "$state/domains.json" >/dev/null
+
+cat >"$rules_dir/app-running-interval.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "app-running-interval", "name": "App running interval", "enabled": true,
+  "trigger": {"type": "interval", "minutes": 1},
+  "conditions": [{"type": "app-running", "match": {"title": "Project Focus"}}],
+  "actions": [{"type": "notify", "message": "focus-app-running"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
+: >"$calls"
+rewind_minute
+run_env "$plugin_dir/bin/omaflow-eval" windows
+! grep -q 'focus-app-running' "$calls"
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"},{"address":"0xfocus","class":"editor","title":"Project Focus"}]' >"$TEST_CLIENTS"
+rewind_minute
+run_env "$plugin_dir/bin/omaflow-eval" windows
+grep -q 'omarchy-notification-send.*focus-app-running' "$calls"
+run_env jq -c '.["app-running-interval"].lastFiredEpoch -= 120' "$state/cooldowns.json" >"$state/cooldowns.json.tmp"
+mv "$state/cooldowns.json.tmp" "$state/cooldowns.json"
+: >"$calls"
+rewind_minute
+TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" windows
+! grep -q 'focus-app-running' "$calls"
+run_env jq -e '.windows | any(.title == "Project Focus")' "$state/domains.json" >/dev/null
+echo '[{"address":"0x1","class":"kitty","title":"Terminal"}]' >"$TEST_CLIENTS"
+: >"$calls"
+rewind_minute
+run_env "$plugin_dir/bin/omaflow-eval" windows
+! grep -q 'focus-app-running' "$calls"
 
 echo "test-eval: ok"

@@ -56,6 +56,8 @@ Item {
       var name = String(event.name || "")
       if (name.indexOf("monitor") === 0)
         root.poke("monitors")
+      else if (name.indexOf("openwindow") === 0 || name.indexOf("closewindow") === 0)
+        root.poke("windows")
     }
   }
 

@@ -14,6 +14,8 @@ module Omaflow
       'lid-closed' => :check_lid_trigger,
       'monitor-connected' => :check_monitor_trigger,
       'monitor-disconnected' => :check_monitor_trigger,
+      'app-opened' => :check_app_trigger,
+      'app-closed' => :check_app_trigger,
       'wifi-connected' => :check_wifi_connected_trigger,
       'wifi-disconnected' => :check_wifi_disconnected_trigger,
       'power-source' => :check_power_trigger,
@@ -26,6 +28,7 @@ module Omaflow
       'on-power' => :check_on_power,
       'lid-state' => :check_lid_state,
       'monitor-present' => :check_monitor_present,
+      'app-running' => :check_app_running,
       'on-ssid' => :check_on_ssid
     }.freeze
 
@@ -141,6 +144,14 @@ module Omaflow
       unknown_keys(match, %w[description name], '.trigger.match') if match.is_a?(Hash)
     end
 
+    def check_app_trigger(trigger)
+      match = trigger['match']
+      target = match.is_a?(Hash) ? match['class'] || match['title'] : nil
+      err("#{trigger['type']} needs match.class or match.title as a plain string") unless safe_str?(target)
+      unknown_keys(trigger, %w[type match], '.trigger')
+      unknown_keys(match, %w[class title], '.trigger.match') if match.is_a?(Hash)
+    end
+
     def check_wifi_connected_trigger(trigger)
       match = trigger['match']
       valid = match.is_a?(Hash) && (match['ssid'] == '*' || safe_str?(match['ssid']) || match['known'] == false)
@@ -216,6 +227,14 @@ module Omaflow
       err('monitor-present needs a plain-string match') unless safe_str?(target)
       unknown_keys(condition, %w[type match], 'monitor-present condition')
       unknown_keys(match, %w[description name], 'monitor-present condition match') if match.is_a?(Hash)
+    end
+
+    def check_app_running(condition)
+      match = condition['match']
+      target = match.is_a?(Hash) ? match['class'] || match['title'] : nil
+      err('app-running needs match.class or match.title as a plain string') unless safe_str?(target)
+      unknown_keys(condition, %w[type match], 'app-running condition')
+      unknown_keys(match, %w[class title], 'app-running condition match') if match.is_a?(Hash)
     end
 
     def check_on_ssid(condition)

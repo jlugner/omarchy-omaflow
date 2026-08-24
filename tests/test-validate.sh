@@ -137,6 +137,40 @@ if validate "$custom_unknown" >"$test_root/custom-unknown.out"; then
 fi
 grep -q "error: unknown field in .trigger: extra" "$test_root/custom-unknown.out"
 
+app_missing="$test_root/app-missing.json"
+cat >"$app_missing" <<'EOF'
+{
+  "schemaVersion": 1, "id": "app-missing", "name": "App missing", "enabled": true,
+  "trigger": {"type": "app-opened"},
+  "conditions": [{"type": "app-running"}],
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$app_missing" >"$test_root/app-missing.out"; then
+  echo "window rules without matches unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: app-opened needs match.class or match.title" "$test_root/app-missing.out"
+grep -q "error: app-running needs match.class or match.title" "$test_root/app-missing.out"
+
+app_unknown="$test_root/app-unknown.json"
+cat >"$app_unknown" <<'EOF'
+{
+  "schemaVersion": 1, "id": "app-unknown", "name": "App unknown", "enabled": true,
+  "trigger": {"type": "app-closed", "match": {"title": "Zoom", "role": "call"}, "once": true},
+  "conditions": [{"type": "app-running", "match": {"class": "zoom", "role": "call"}, "cached": true}],
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$app_unknown" >"$test_root/app-unknown.out"; then
+  echo "window rules with unknown fields unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: unknown field in .trigger: once" "$test_root/app-unknown.out"
+grep -q "error: unknown field in .trigger.match: role" "$test_root/app-unknown.out"
+grep -q "error: unknown field in app-running condition: cached" "$test_root/app-unknown.out"
+grep -q "error: unknown field in app-running condition match: role" "$test_root/app-unknown.out"
+
 lid="$test_root/lid.json"
 cat >"$lid" <<'EOF'
 {

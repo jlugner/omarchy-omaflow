@@ -12,6 +12,8 @@ module Omaflow
         {"type":"lid-closed"}
         {"type":"monitor-connected","match":{"description":"<substring>"}} (or match.name)
         {"type":"monitor-disconnected","match":{"description":"<substring>"}}
+        {"type":"app-opened","match":{"class":"<substring>"}} (or match.title)
+        {"type":"app-closed","match":{"class":"<substring>"}} (or match.title)
         {"type":"wifi-connected","match":{"ssid":"<substring or *>"}} or {"type":"wifi-connected","match":{"known":false}} for never-seen networks
         {"type":"wifi-disconnected"}
         {"type":"power-source","source":"ac"|"battery"}
@@ -22,7 +24,9 @@ module Omaflow
         {"type":"on-power","source":"ac"|"battery"}
         {"type":"lid-state","state":"open"|"closed"}
         {"type":"monitor-present","match":{"description":"<substring>"}}
+        {"type":"app-running","match":{"class":"<substring>"}} (or match.title)
         {"type":"on-ssid","ssid":"<substring>"}
+      App class/title matching is a case-insensitive substring match against both fields; prefer stable class fragments such as zoom, slack, or firefox.
       Actions (executed in order):
         {"type":"theme","name":"<installed theme>"}
         {"type":"dnd","state":"on"|"off"}
@@ -34,7 +38,7 @@ module Omaflow
         {"type":"script","name":"<allowed script name>"} — runs one exact packaged or user-approved executable. name must be from the allowed scripts inventory; no path, arguments, or shell text are permitted in a rule.
         {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
-      In notify and webhook messages {{trigger}} is replaced with a description of the firing event. Every event data key is also available as {{key}}, including {{ssid}}, {{name}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings.
+      In notify and webhook messages {{trigger}} is replaced with a description of the firing event. Every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings.
       Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.
       No other trigger, condition, or action types exist. Never invent fields.
     DOC

@@ -137,6 +137,8 @@ module Omaflow
       match = trigger['match'].is_a?(Hash) ? trigger['match'] : {}
       suffix =
         if match['description'] then ": #{match['description']}"
+        elsif match['class'] then ": #{match['class']}"
+        elsif match['title'] then ": #{match['title']}"
         elsif match['name'] then ": #{match['name']}"
         elsif match['ssid'] then ": #{match['ssid']}"
         elsif match['known'] == false then ': unknown network'

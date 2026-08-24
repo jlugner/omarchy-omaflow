@@ -63,9 +63,9 @@ omaflow webhooks [add <name> <url> [format] | remove <name>]
 
 ## What rules can do
 
-**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · named custom events.
+**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · app opened/closed · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · named custom events.
 
-**Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · on a given wifi.
+**Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · on a given wifi.
 
 **Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · run an allowed script · send a notification · post to a webhook.
 
@@ -78,7 +78,9 @@ omaflow webhooks add phone https://ntfy.sh/your-topic ntfy
 
 Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a default `json` envelope.
 
-Fire a custom event with `omaflow trigger deploy-done env=prod`. Notify and webhook messages can use `{{trigger}}` plus event fields such as `{{env}}`, `{{ssid}}`, `{{name}}`, `{{source}}`, and `{{at}}`. Unknown placeholders become empty strings.
+Fire a custom event with `omaflow trigger deploy-done env=prod`. Notify and webhook messages can use `{{trigger}}` plus event fields such as `{{class}}`, `{{title}}`, `{{env}}`, `{{ssid}}`, `{{name}}`, `{{source}}`, and `{{at}}`. Unknown placeholders become empty strings.
+
+For example, opening Slack can enable DND, or closing Zoom can send a notification.
 
 There is no shell action, on purpose. The agent can only emit typed, allowlisted actions, and every rule is validated against your actual machine (the theme exists, the app is installed) at install time and again before every run.
 
@@ -103,7 +105,7 @@ Two packaged scripts, `lock-fingerprint-enable` and `lock-fingerprint-disable`, 
 - Authoring hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps, allowed script names), validates the result, and stages it. `stage accept` is the only way into the rules directory.
 - Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > Omarchy's default agent > first installed of codex/claude/grok.
 
-Nothing leaves your machine at trigger time, except what a webhook action posts to endpoints you added. Authoring sends your description and the inventory above to your agent, with tools, MCP servers, and web access turned off as far as each CLI allows, plus a hard timeout. The validator also rejects option-shaped strings (leading dashes, control characters) in any field that reaches a command line.
+Nothing leaves your machine at trigger time, except what a webhook action posts to endpoints you added. Window titles live in `~/.local/state/omaflow/domains.json`, which is written with mode `0600`. Authoring sends your description and the inventory above to your agent, with tools, MCP servers, and web access turned off as far as each CLI allows, plus a hard timeout. The validator also rejects option-shaped strings (leading dashes, control characters) in any field that reaches a command line.
 
 ## Verify
 
