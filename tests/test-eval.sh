@@ -271,4 +271,22 @@ if run_env "$plugin_dir/bin/omaflow" disable broken 2>/dev/null; then
 fi
 [[ $(cat "$rules_dir/broken.json") == "not json" ]]
 
+# 14. A vanished mains probe preserves battery state instead of fabricating
+#     an AC transition; the state survives in domains.json unchanged.
+run_env jq -e '.onAc == false' "$state/domains.json" >/dev/null
+mv "$test_root/power/AC/type" "$test_root/power/AC/type.hidden"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" test
+! grep -q 'setDnd' "$calls"
+run_env jq -e '.onAc == false' "$state/domains.json" >/dev/null
+mv "$test_root/power/AC/type.hidden" "$test_root/power/AC/type"
+
+# 15. Empty XDG variables mean unset, not the filesystem root.
+XDG_STATE_HOME="" XDG_CONFIG_HOME="" HOME="$test_root" /usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
+  abort "empty XDG_STATE_HOME resolved to #{Omaflow::Paths.state_dir}" unless
+    Omaflow::Paths.state_dir == File.join(Dir.home, ".local", "state", "omaflow")
+  abort "empty XDG_CONFIG_HOME resolved to #{Omaflow::Paths.config_dir}" unless
+    Omaflow::Paths.config_dir == File.join(Dir.home, ".config", "omaflow")
+'
+
 echo "test-eval: ok"

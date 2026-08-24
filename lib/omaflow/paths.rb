@@ -6,8 +6,13 @@ module Omaflow
   module Paths
     module_function
 
-    def config_dir = File.join(ENV.fetch('XDG_CONFIG_HOME') { File.join(Dir.home, '.config') }, 'omaflow')
-    def state_dir = File.join(ENV.fetch('XDG_STATE_HOME') { File.join(Dir.home, '.local', 'state') }, 'omaflow')
+    def env_dir(name, *fallback)
+      value = ENV.fetch(name, '')
+      value.empty? ? File.join(Dir.home, *fallback) : value
+    end
+
+    def config_dir = File.join(env_dir('XDG_CONFIG_HOME', '.config'), 'omaflow')
+    def state_dir = File.join(env_dir('XDG_STATE_HOME', '.local', 'state'), 'omaflow')
     def rules_dir = File.join(config_dir, 'rules')
     def config_file = File.join(config_dir, 'config.json')
     def webhooks_file = File.join(config_dir, 'webhooks.json')
@@ -18,7 +23,7 @@ module Omaflow
     def seen_ssids_file = File.join(state_dir, 'seen-ssids.json')
     def staging_file = File.join(state_dir, 'staging.json')
     def snapshots_dir = File.join(state_dir, 'snapshots')
-    def omarchy_default_agent_file = File.join(ENV.fetch('XDG_CONFIG_HOME') { File.join(Dir.home, '.config') }, 'omarchy', 'defaults', 'agent')
+    def omarchy_default_agent_file = File.join(env_dir('XDG_CONFIG_HOME', '.config'), 'omarchy', 'defaults', 'agent')
 
     def ensure_dirs
       FileUtils.mkdir_p([rules_dir, state_dir, snapshots_dir])

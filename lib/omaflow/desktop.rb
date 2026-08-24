@@ -5,7 +5,7 @@ module Omaflow
     module_function
 
     def application_dirs
-      data_home = ENV.fetch('XDG_DATA_HOME') { File.join(Dir.home, '.local', 'share') }
+      data_home = Paths.env_dir('XDG_DATA_HOME', '.local', 'share')
       [File.join(data_home, 'applications'), '/usr/share/applications', '/usr/local/share/applications']
     end
 

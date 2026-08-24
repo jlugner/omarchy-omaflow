@@ -75,7 +75,7 @@ module Omaflow
       rescue StandardError
         false
       end
-      return true unless mains
+      return nil unless mains
 
       online = File.read(File.join(File.dirname(mains), 'online')).strip
       { '1' => true, '0' => false }[online]
@@ -191,7 +191,7 @@ module Omaflow
       case condition['type']
       when 'time-between' then time_between?(condition['from'], condition['to'])
       when 'weekday' then condition.fetch('days', []).include?(@weekday)
-      when 'on-power' then (condition['source'] == 'ac') == @current['onAc']
+      when 'on-power' then (condition['source'] == 'ac') == @current.fetch('onAc', true)
       when 'monitor-present' then monitor_present?(condition)
       when 'on-ssid' then @current['ssid'].to_s.downcase.include?(condition['ssid'].to_s.downcase)
       else false

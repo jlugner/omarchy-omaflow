@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'tempfile'
+require 'tmpdir'
 
 module Omaflow
   module Agent
@@ -39,40 +40,38 @@ module Omaflow
       answer&.byteslice(0, OUTPUT_CAP)
     end
 
-    def scratch_dir
-      dir = File.join(Paths.state_dir, '.agent-cwd')
-      FileUtils.mkdir_p(dir)
-      dir
+    def with_scratch_dir
+      Paths.ensure_dirs
+      Dir.mktmpdir('.agent-cwd', Paths.state_dir) { yield it }
     end
 
-    def run_codex(task)
-      Paths.ensure_dirs
+    def run_codex(task) = with_scratch_dir do |scratch|
       out = Tempfile.create('.agent', Paths.state_dir)
       out.close
       ok = system('timeout', '--kill-after=10', budget, 'codex', 'exec',
                   '--skip-git-repo-check', '--sandbox', 'read-only',
                   '--ephemeral', '--ignore-user-config', '--ignore-rules',
-                  '--cd', scratch_dir,
+                  '--cd', scratch,
                   '--config', 'notify=[]', '--config', 'model_reasoning_effort="low"',
                   '--output-last-message', out.path, task,
-                  out: File::NULL, err: File::NULL, chdir: scratch_dir)
+                  out: File::NULL, err: File::NULL, chdir: scratch)
       ok ? File.read(out.path) : nil
     ensure
       File.delete(out.path) if out && File.exist?(out.path)
     end
 
-    def run_claude(task)
+    def run_claude(task) = with_scratch_dir do |scratch|
       output, ok = Sys.capture('claude', '-p', task, '--output-format', 'text',
                                '--strict-mcp-config', '--setting-sources', '',
                                '--disallowedTools', *CLAUDE_DISALLOWED_TOOLS,
-                               timeout: budget, chdir: scratch_dir)
+                               timeout: budget, chdir: scratch)
       ok ? output : nil
     end
 
-    def run_grok(task)
+    def run_grok(task) = with_scratch_dir do |scratch|
       output, ok = Sys.capture('grok', '-p', task, '--output-format', 'plain',
                                '--tools', '', '--disable-web-search',
-                               timeout: budget, chdir: scratch_dir)
+                               timeout: budget, chdir: scratch)
       ok ? output : nil
     end
 
