@@ -31,6 +31,11 @@ jobs:
             and (.entryPoints.service | length > 0)
           ' manifest.json
 
+      - name: Tighten runner directory modes for the script trust chain
+        run: |
+          sudo chmod go-w /home/runner /home/runner/work "$GITHUB_WORKSPACE/.." || true
+          chmod -R go-w .
+
       - name: Vocabulary drift check
         run: tests/test-docs.sh
 
