@@ -13,6 +13,7 @@ trap 'rm -rf "$test_root"' EXIT
 
 expected="trigger manual
 trigger time
+trigger interval
 trigger monitor-connected
 trigger monitor-disconnected
 trigger wifi-connected

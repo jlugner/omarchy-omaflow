@@ -289,7 +289,37 @@ run_env "$plugin_dir/bin/omaflow-eval" test
 run_env jq -e '.onAc == false' "$state/domains.json" >/dev/null
 mv "$test_root/power/AC/type.hidden" "$test_root/power/AC/type"
 
-# 15. Empty XDG variables mean unset, not the filesystem root.
+# 15. interval trigger: fires on a minute tick when enough time has passed
+#     since the rule last fired, and stays quiet inside the interval. The
+#     stored minute is rewound to force tick events without waiting.
+cat >"$rules_dir/eye-timer.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "eye-timer", "name": "Eye timer", "enabled": true,
+  "trigger": {"type": "interval", "minutes": 20},
+  "actions": [{"type": "notify", "message": "eyes"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+rewind_minute() {
+  run_env jq -c '.minute = "00:00"' "$state/domains.json" >"$state/domains.json.tmp"
+  mv "$state/domains.json.tmp" "$state/domains.json"
+}
+: >"$calls"
+rewind_minute
+run_env "$plugin_dir/bin/omaflow-eval" test
+grep -q 'omarchy-notification-send.*eyes' "$calls"
+: >"$calls"
+rewind_minute
+run_env "$plugin_dir/bin/omaflow-eval" test
+! grep -q 'omarchy-notification-send.*eyes' "$calls"
+run_env jq -c '.["eye-timer"].lastFiredEpoch = (.["eye-timer"].lastFiredEpoch - 1300)' "$state/cooldowns.json" >"$state/cooldowns.json.tmp"
+mv "$state/cooldowns.json.tmp" "$state/cooldowns.json"
+: >"$calls"
+rewind_minute
+run_env "$plugin_dir/bin/omaflow-eval" test
+grep -q 'omarchy-notification-send.*eyes' "$calls"
+run_env "$plugin_dir/bin/omaflow" delete eye-timer >/dev/null
+
+# 16. Empty XDG variables mean unset, not the filesystem root.
 XDG_STATE_HOME="" XDG_CONFIG_HOME="" HOME="$test_root" /usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
   abort "empty XDG_STATE_HOME resolved to #{Omaflow::Paths.state_dir}" unless
     Omaflow::Paths.state_dir == File.join(Dir.home, ".local", "state", "omaflow")

@@ -140,14 +140,15 @@ module Omaflow
     def time_events
       return [] if @previous['minute'] == @current['minute']
 
-      [{ 'type' => 'time', 'data' => { 'at' => @current['minute'] } }]
+      [{ 'type' => 'time', 'data' => { 'at' => @current['minute'] } },
+       { 'type' => 'interval', 'data' => { 'at' => @current['minute'] } }]
     end
 
     def fire_matching_rules(event)
       Store.rules.each do |rule|
         next unless rule['enabled'] == true
         next unless rule.dig('trigger', 'type') == event['type']
-        next unless trigger_matches?(rule['trigger'], event)
+        next unless trigger_matches?(rule, event)
         next unless conditions_pass?(rule)
         next unless cooldown_over?(rule)
 
@@ -163,7 +164,8 @@ module Omaflow
       "#{event['type']} #{pairs} (#{@reason})".squeeze(' ')
     end
 
-    def trigger_matches?(trigger, event)
+    def trigger_matches?(rule, event)
+      trigger = rule['trigger']
       data = event['data'] || {}
       case event['type']
       when 'monitor-connected', 'monitor-disconnected'
@@ -177,8 +179,14 @@ module Omaflow
         end
       when 'power-source' then data['source'] == trigger['source']
       when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
+      when 'interval' then interval_elapsed?(rule)
       else true
       end
+    end
+
+    def interval_elapsed?(rule)
+      last = Store.read_json(Paths.cooldowns_file, {}).dig(rule['id'], 'lastFiredEpoch').to_i
+      @now.to_i - last >= rule.dig('trigger', 'minutes').to_i * 60
     end
 
     def trigger_days(trigger) = trigger.fetch('days', Vocabulary::WEEKDAYS)

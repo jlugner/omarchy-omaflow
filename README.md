@@ -60,7 +60,7 @@ omaflow webhooks [add <name> <url> [format] | remove <name>]
 
 ## What rules can do
 
-**Triggers:** manual · time of day (+ weekdays) · monitor connected/disconnected · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery.
+**Triggers:** manual · time of day (+ weekdays) · every N minutes · monitor connected/disconnected · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery.
 
 **Conditions:** time window · weekday · on AC/battery · monitor present · on a given wifi.
 

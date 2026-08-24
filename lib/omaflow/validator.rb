@@ -9,6 +9,7 @@ module Omaflow
     TRIGGER_CHECKS = {
       'manual' => :check_manual_trigger,
       'time' => :check_time_trigger,
+      'interval' => :check_interval_trigger,
       'monitor-connected' => :check_monitor_trigger,
       'monitor-disconnected' => :check_monitor_trigger,
       'wifi-connected' => :check_wifi_connected_trigger,
@@ -115,6 +116,11 @@ module Omaflow
       days = trigger.fetch('days', Vocabulary::WEEKDAYS)
       err('time trigger days must be from mon..sun') unless days.is_a?(Array) && !days.empty? && (days - Vocabulary::WEEKDAYS).empty?
       unknown_keys(trigger, %w[type at days], '.trigger')
+    end
+
+    def check_interval_trigger(trigger)
+      err('interval trigger needs minutes as an integer 1..1440') unless integer_between?(trigger['minutes'], 1..1440)
+      unknown_keys(trigger, %w[type minutes], '.trigger')
     end
 
     def check_monitor_trigger(trigger)

@@ -113,6 +113,7 @@ module Omaflow
         elsif match['ssid'] then ": #{match['ssid']}"
         elsif match['known'] == false then ': unknown network'
         elsif trigger['at'] then " #{trigger['at']}"
+        elsif trigger['minutes'] then " every #{trigger['minutes']}m"
         elsif trigger['source'] then ": #{trigger['source']}"
         else ''
         end

@@ -7,6 +7,7 @@ module Omaflow
       Triggers (exactly one):
         {"type":"manual"}
         {"type":"time","at":"HH:MM","days":["mon".."sun"] (optional)}
+        {"type":"interval","minutes":N} — fires roughly every N minutes (1..1440, integer). Combine with conditions to scope where it applies; omit cooldownSeconds, the interval is the spacing.
         {"type":"monitor-connected","match":{"description":"<substring>"}} (or match.name)
         {"type":"monitor-disconnected","match":{"description":"<substring>"}}
         {"type":"wifi-connected","match":{"ssid":"<substring or *>"}} or {"type":"wifi-connected","match":{"known":false}} for never-seen networks
