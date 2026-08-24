@@ -36,24 +36,22 @@ run_cmd() { timeout 30 "$@"; }
 exec 8>"$OMAFLOW_STATE_DIR/.run.lock"
 flock -w 90 8 || { echo "Another Omaflow run is holding the lock" >&2; exit 1; }
 
-# ---- revert -------------------------------------------------------------------
-if [[ -n $revert_id ]]; then
-  [[ $revert_id =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,40}$ ]] || { echo "Invalid execution id" >&2; exit 2; }
-  snapshot_file="$OMAFLOW_SNAPSHOTS_DIR/$revert_id.json"
-  [[ -f $snapshot_file ]] || { echo "No snapshot for execution: $revert_id" >&2; exit 1; }
-  snap=$(jq -c 'select(type == "object")' "$snapshot_file" 2>/dev/null || true)
-  [[ -n $snap ]] || { echo "Snapshot is not valid JSON: $snapshot_file" >&2; exit 1; }
+# Restore a snapshot (JSON object) in place. Sets $revert_failures. Must be
+# called while holding the run lock (FD 8) so a rollback never races another
+# run's changes. Used both by --revert and by inline rollback on a failed run.
+revert_failures=0
+restore_snapshot() {
+  local snap="$1" value subcmd nl sa
   revert_failures=0
-  restore() { # key, command...
-    local value
+  restore_one() { # key, command...
     value=$(jq -r --arg k "$1" '.[$k] // ""' <<<"$snap")
     [[ -n $value ]] || return 0
     shift
     run_cmd "$@" "$value" >/dev/null 2>&1 || { echo "revert failed for: $*" >&2; ((revert_failures += 1)); }
   }
-  restore theme omarchy theme set
-  restore dnd omarchy-shell notifications setDnd
-  restore defaultSink pactl set-default-sink
+  restore_one theme omarchy theme set
+  restore_one dnd omarchy-shell notifications setDnd
+  restore_one defaultSink pactl set-default-sink
   nl=$(jq -r '.nightlight // ""' <<<"$snap")
   if [[ $nl == on || $nl == off ]]; then
     subcmd=enable; [[ $nl == off ]] && subcmd=disable
@@ -64,6 +62,16 @@ if [[ -n $revert_id ]]; then
     subcmd=enable; [[ $sa == "true" ]] && subcmd=disable
     run_cmd omarchy-shell idle "$subcmd" >/dev/null 2>&1 || ((revert_failures += 1))
   fi
+}
+
+# ---- revert -------------------------------------------------------------------
+if [[ -n $revert_id ]]; then
+  [[ $revert_id =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,40}$ ]] || { echo "Invalid execution id" >&2; exit 2; }
+  snapshot_file="$OMAFLOW_SNAPSHOTS_DIR/$revert_id.json"
+  [[ -f $snapshot_file ]] || { echo "No snapshot for execution: $revert_id" >&2; exit 1; }
+  snap=$(jq -c 'select(type == "object")' "$snapshot_file" 2>/dev/null || true)
+  [[ -n $snap ]] || { echo "Snapshot is not valid JSON: $snapshot_file" >&2; exit 1; }
+  restore_snapshot "$snap"
   revert_status=ok
   (( revert_failures > 0 )) && revert_status=partial
   omaflow_log_append "$(jq -cn --arg at "$(now)" --arg execId "$revert_id" --arg status "$revert_status" \
@@ -96,15 +104,18 @@ snapshot="{}"
 has_action() { jq -e --arg t "$1" '[.actions[].type] | index($t) != null' >/dev/null <<<"$rule"; }
 snapshot_failed=""
 if ! $dry_run; then
-  snap_add() { # key value
-    if [[ -z ${2//[[:space:]]/} ]]; then
+  # snap_add key value [validator-regex]. A missing value, or one that fails
+  # the shape check, marks the snapshot unusable so the run aborts before
+  # changing anything it could not later restore.
+  snap_add() {
+    if [[ -z ${2//[[:space:]]/} ]] || { [[ -n ${3:-} ]] && [[ ! $2 =~ $3 ]]; }; then
       snapshot_failed="$1"
       return 0
     fi
     snapshot=$(jq -c --arg k "$1" --arg v "$2" '.[$k] = $v' <<<"$snapshot")
   }
   has_action theme && snap_add theme "$(run_cmd omarchy theme current 2>/dev/null || true)"
-  has_action dnd && snap_add dnd "$(run_cmd omarchy-shell notifications dndState 2>/dev/null || true)"
+  has_action dnd && snap_add dnd "$(run_cmd omarchy-shell notifications dndState 2>/dev/null || true)" '^(on|off)$'
   if has_action nightlight; then
     nl_enabled=$(run_cmd omarchy-shell nightlight status 2>/dev/null | jq -r 'if type == "object" then (if .enabled then "on" else "off" end) elif . == "on" or . == "off" then . else "" end' 2>/dev/null || true)
     snap_add nightlight "$nl_enabled"
@@ -185,29 +196,30 @@ apply_action() { # JSON action -> 0/1, sets $detail
     # carry URLs — the agent can only reference endpoints the user added by
     # hand with `omaflow webhooks add`, so a compromised rule cannot choose
     # where data goes.
-    local hook_name msg hooks hook url format body
+    local hook_name msg hooks hook url format body ctype
     hook_name=$(jq -r '.endpoint' <<<"$action")
-    msg=$(jq -r '.message' <<<"$action")
-    msg=${msg//'{{trigger}}'/$trigger_desc}
+    msg=$(omaflow_subst "$(jq -r '.message' <<<"$action")" '{{trigger}}' "$trigger_desc")
     hooks=$(jq -c 'select(type == "object")' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '{}')
     hook=$(jq -c --arg n "$hook_name" '.[$n] // empty' <<<"$hooks")
     [[ -n $hook ]] || { detail="no webhook endpoint named: $hook_name"; return 1; }
+    # Re-validate the stored endpoint: a synced or hand-edited webhooks.json
+    # must still be a well-formed object with an http(s) URL and known format.
+    jq -e 'type == "object" and (.url | type == "string" and test("^https?://"))
+           and ((.format // "json") | IN("json","slack","discord","ntfy","raw"))' \
+      >/dev/null <<<"$hook" || { detail="endpoint '$hook_name' is malformed in webhooks.json"; return 1; }
     url=$(jq -r '.url' <<<"$hook")
     format=$(jq -r '.format // "json"' <<<"$hook")
     case "$format" in
-    slack) body=$(jq -cn --arg t "$msg" '{text: $t}') ;;
-    discord) body=$(jq -cn --arg t "$msg" '{content: $t}') ;;
-    ntfy | raw) body="$msg" ;;
+    slack) body=$(jq -cn --arg t "$msg" '{text: $t}'); ctype='application/json' ;;
+    discord) body=$(jq -cn --arg t "$msg" '{content: $t}'); ctype='application/json' ;;
+    ntfy | raw) body="$msg"; ctype='text/plain' ;;
     *) body=$(jq -cn --arg m "$msg" --arg r "$rule_id" --arg trig "$trigger_desc" --arg at "$(now)" \
-      '{message: $m, rule: $r, trigger: $trig, at: $at}') ;;
+      '{message: $m, rule: $r, trigger: $trig, at: $at}'); ctype='application/json' ;;
     esac
-    if [[ $format == ntfy || $format == raw ]]; then
-      curl -fsS --max-time 15 -X POST -H 'Content-Type: text/plain' \
-        --data-binary "$body" -- "$url" >/dev/null 2>&1 || { detail="POST to $hook_name failed"; return 1; }
-    else
-      curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
-        --data-binary "$body" -- "$url" >/dev/null 2>&1 || { detail="POST to $hook_name failed"; return 1; }
-    fi
+    # -q ignores ~/.curlrc; --globoff stops [] {} in the URL being expanded;
+    # --data-raw (never --data-binary "$x") stops a leading @ posting a file.
+    curl -q -fsS --globoff --max-time 15 -X POST -H "Content-Type: $ctype" \
+      --data-raw "$body" -- "$url" >/dev/null 2>&1 || { detail="POST to $hook_name failed"; return 1; }
     detail="$hook_name ($format)"
     ;;
   notify)
@@ -244,17 +256,20 @@ while IFS= read -r action; do
 done < <(jq -c '.actions[]' <<<"$rule")
 
 if [[ $status == failed ]]; then
-  # Roll back the revertible actions that were applied. Launch/workspace
-  # actions are not revertible, so the run stays labelled "failed" — the
-  # revert gets its own log entry with its own outcome.
-  flock -u 8
-  if "$0" --revert "$exec_id" >/dev/null 2>&1; then
+  # Roll back the revertible actions that were applied — while still holding
+  # the run lock (FD 8), so no concurrent run can slip changes in between and
+  # get clobbered by our restore. Launch/workspace actions are not revertible,
+  # so the run stays labelled "failed"; the revert logs its own outcome.
+  restore_snapshot "$snapshot"
+  revert_status=ok
+  (( revert_failures > 0 )) && revert_status=partial
+  omaflow_log_append "$(jq -cn --arg at "$(now)" --arg execId "$exec_id" --arg status "$revert_status" \
+    '{at: $at, kind: "revert", execId: $execId, status: $status}')"
+  if [[ $revert_status == ok ]]; then
     omaflow_notify "Omaflow rule failed" "$(jq -r '.name' <<<"$rule") — revertible changes rolled back"
   else
     omaflow_notify "Omaflow rule failed" "$(jq -r '.name' <<<"$rule") — rollback incomplete, see omaflow log"
   fi
-  exec 8>"$OMAFLOW_STATE_DIR/.run.lock"
-  flock -w 90 8 || true
 fi
 
 kind="run"; $dry_run && kind="dry-run"

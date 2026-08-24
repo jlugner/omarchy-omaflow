@@ -112,9 +112,12 @@ omaflow_agent() {
 }
 
 # Run one single-turn prompt on the chosen backend. stdout: answer (capped).
-# Tools, MCP servers, and web access are disabled as far as each CLI allows —
-# the task is pure text translation and must stay side-effect free even under
-# prompt injection. A wall-clock timeout bounds hung backends.
+# The task is pure text translation and must stay side-effect free even under
+# prompt injection, so each backend is invoked with its own configuration
+# ignored and tools/MCP/web disabled as far as its CLI allows. This is
+# defense in depth; the real boundary is that the output is validated against
+# a strict schema and executed only through an allowlist. A wall-clock
+# timeout bounds hung backends.
 omaflow_agent_run() {
   local backend="$1" task="$2" out rc=0
   local budget="${OMAFLOW_AGENT_TIMEOUT:-180}"
@@ -124,6 +127,9 @@ omaflow_agent_run() {
     if timeout "$budget" codex exec \
       --skip-git-repo-check \
       --sandbox read-only \
+      --ephemeral \
+      --ignore-user-config \
+      --ignore-rules \
       --config 'notify=[]' \
       --config 'model_reasoning_effort="low"' \
       --output-last-message "$out" \
@@ -138,6 +144,7 @@ omaflow_agent_run() {
   claude)
     out=$(timeout "$budget" claude -p "$task" --output-format text \
       --strict-mcp-config \
+      --setting-sources "" \
       --disallowedTools "Bash" "Edit" "Write" "NotebookEdit" "Read" "Glob" "Grep" "Task" "WebFetch" "WebSearch" "TodoWrite" \
       2>/dev/null) || return 1
     head -c 65536 <<<"$out"
@@ -153,6 +160,18 @@ omaflow_agent_run() {
     return 1
     ;;
   esac
+}
+
+# Literal (non-regex, non-patsub) substitution of all occurrences of $2 in $1
+# with $3. Bash's ${x//a/b} treats & and \ specially in the replacement under
+# patsub_replacement, which would corrupt event text like "ssid=R&D".
+omaflow_subst() {
+  local haystack="$1" needle="$2" repl="$3" out=""
+  while [[ $haystack == *"$needle"* ]]; do
+    out+=${haystack%%"$needle"*}$repl
+    haystack=${haystack#*"$needle"}
+  done
+  printf '%s' "$out$haystack"
 }
 
 # Pull the first JSON object out of possibly chatty agent output.

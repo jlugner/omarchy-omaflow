@@ -151,23 +151,27 @@ cat >"$test_root/config/omaflow/webhooks.json" <<'EOF'
 {"team-slack": {"url": "https://hooks.example.com/T/B/x", "format": "slack"},
  "phone": {"url": "https://ntfy.example.com/topic", "format": "ntfy"}}
 EOF
+# A trigger with & and a message with a leading @ (a file-upload attempt):
+# the & must survive literally, and curl must use --data-raw (never
+# --data-binary "@…", which would upload a file).
 cat >"$rules_dir/hook-rule.json" <<'EOF'
 {
   "schemaVersion": 1, "id": "hook-rule", "name": "Ping team", "enabled": true,
   "trigger": {"type": "manual"},
   "actions": [
     {"type": "webhook", "endpoint": "team-slack", "message": "Desktop: {{trigger}}"},
-    {"type": "webhook", "endpoint": "phone", "message": "ping"}
+    {"type": "webhook", "endpoint": "phone", "message": "@/etc/passwd"}
   ],
   "cooldownSeconds": 0, "source": "test"
 }
 EOF
 : >"$calls"
-run_env "$plugin_dir/bin/omaflow-run" hook-rule --trigger "wifi-connected ssid=Office"
+run_env "$plugin_dir/bin/omaflow-run" hook-rule --trigger "wifi ssid=R&D"
 grep -q 'curl.*https://hooks.example.com/T/B/x' "$calls"
-grep -q -- '--data-binary {"text":"Desktop: wifi-connected ssid=Office"}' "$calls"
+grep -q -- '--data-raw {"text":"Desktop: wifi ssid=R&D"}' "$calls"   # & preserved, not eaten by patsub
 grep -q 'Content-Type: text/plain' "$calls"
-grep -q -- '--data-binary ping ' "$calls"
+grep -q -- '--data-raw @/etc/passwd' "$calls"                        # passed as data, not a file ref
+! grep -q -- '--data-binary' "$calls"                                # never the @-interpreting flag
 run_env jq -e '.status == "ok"' <(grep '"ruleId":"hook-rule"' "$state/log.jsonl" | tail -1) >/dev/null
 
 cat >"$rules_dir/bad-hook.json" <<'EOF'
@@ -181,6 +185,26 @@ EOF
 : >"$calls"
 if run_env "$plugin_dir/bin/omaflow-run" bad-hook 2>/dev/null; then
   echo "unknown endpoint unexpectedly ran" >&2
+  exit 1
+fi
+! grep -q curl "$calls"
+
+# A malformed stored endpoint (non-http url) is rejected at run time even
+# though the rule references a real endpoint name.
+cat >"$test_root/config/omaflow/webhooks.json" <<'EOF'
+{"evil": {"url": "file:///etc/passwd", "format": "raw"}}
+EOF
+cat >"$rules_dir/evil-hook.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "evil-hook", "name": "Evil", "enabled": true,
+  "trigger": {"type": "manual"},
+  "actions": [{"type": "webhook", "endpoint": "evil", "message": "x"}],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+if run_env "$plugin_dir/bin/omaflow-run" evil-hook 2>/dev/null; then
+  echo "malformed endpoint unexpectedly ran" >&2
   exit 1
 fi
 ! grep -q curl "$calls"

@@ -174,6 +174,7 @@ Item {
       if (action.app) atext += " → " + action.app + (action.workspace ? " (workspace " + action.workspace + ")" : "")
       if (action.number) atext += " → " + action.number
       if (action.match) atext += " → " + action.match
+      if (action.endpoint) atext += " → " + action.endpoint  // webhook: show WHERE it sends
       if (action.title) atext += " → [" + action.title + "]"
       if (action.message) atext += " \"" + action.message + "\""
       lines.push((a === 0 ? "Do     " : "       ") + atext)
@@ -333,7 +334,8 @@ Item {
           id: previewCard
           width: Math.min(Style.space(560), parent.width - Style.space(24))
           height: Math.min(
-            previewColumn.implicitHeight + previewCard.contentTopInset + previewCard.contentBottomInset,
+            previewColumn.implicitHeight + previewFooter.implicitHeight + Style.spacing.sm
+              + previewCard.contentTopInset + previewCard.contentBottomInset,
             parent.height - Style.space(24)
           )
           anchors.centerIn: parent
@@ -344,75 +346,94 @@ Item {
 
           MouseArea { anchors.fill: parent; onClicked: {} }
 
-          Column {
-            id: previewColumn
+          // Scrollable body: title, request, the full action list, warnings.
+          // Kept above a pinned footer so the Install/Discard controls — and
+          // the disclosure of every action, including webhook destinations —
+          // can never be clipped below the card on a small screen.
+          Flickable {
+            id: previewScroll
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
+            anchors.bottom: previewFooter.top
             anchors.topMargin: previewCard.contentTopInset
             anchors.leftMargin: previewCard.contentLeftInset
             anchors.rightMargin: previewCard.contentRightInset
-            spacing: Style.spacing.sm
+            anchors.bottomMargin: Style.spacing.sm
+            clip: true
+            contentHeight: previewColumn.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
 
-            Text {
-              width: parent.width
-              text: root.previewOpen ? String(root.staging.rule.name || root.staging.rule.id) : ""
-              textFormat: Text.PlainText
-              color: root.foreground
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.body
-              font.weight: Font.DemiBold
-              elide: Text.ElideRight
-            }
-
-            Text {
-              width: parent.width
-              text: root.previewOpen ? "“" + String(root.staging.request || "") + "”  ·  compiled by " + String(root.staging.agent || "?") : ""
-              textFormat: Text.PlainText
-              color: root.foreground
-              opacity: 0.55
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.Wrap
-            }
-
-            Repeater {
-              model: root.previewOpen ? root.summarizeRule(root.staging.rule) : []
+            Column {
+              id: previewColumn
+              width: previewScroll.width
+              spacing: Style.spacing.sm
 
               Text {
-                required property var modelData
-                width: previewColumn.width
-                text: modelData
+                width: parent.width
+                text: root.previewOpen ? String(root.staging.rule.name || root.staging.rule.id) : ""
                 textFormat: Text.PlainText
                 color: root.foreground
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.body
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                text: root.previewOpen ? "“" + String(root.staging.request || "") + "”  ·  compiled by " + String(root.staging.agent || "?") : ""
+                textFormat: Text.PlainText
+                color: root.foreground
+                opacity: 0.55
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.Wrap
+              }
+
+              Repeater {
+                model: root.previewOpen ? root.summarizeRule(root.staging.rule) : []
+
+                Text {
+                  required property var modelData
+                  width: previewColumn.width
+                  text: modelData
+                  textFormat: Text.PlainText
+                  color: root.foreground
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.Wrap
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: root.previewOpen && (root.staging.warnings || []).length > 0
+                text: root.previewOpen ? (root.staging.warnings || []).join("\n") : ""
+                textFormat: Text.PlainText
+                color: root.accentColor
+                opacity: 0.9
                 font.family: Style.font.menuFamily
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.Wrap
               }
             }
+          }
 
-            Text {
-              width: parent.width
-              visible: root.previewOpen && (root.staging.warnings || []).length > 0
-              text: root.previewOpen ? (root.staging.warnings || []).join("\n") : ""
-              textFormat: Text.PlainText
-              color: root.accentColor
-              opacity: 0.9
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.Wrap
-            }
-
-            Text {
-              width: parent.width
-              text: "↵ Install rule    Esc Discard"
-              textFormat: Text.PlainText
-              color: root.foreground
-              opacity: 0.45
-              font.family: Style.font.menuFamily
-              font.pixelSize: Style.font.caption
-              topPadding: Style.spacing.sm
-            }
+          Text {
+            id: previewFooter
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: previewCard.contentLeftInset
+            anchors.rightMargin: previewCard.contentRightInset
+            anchors.bottomMargin: previewCard.contentBottomInset
+            text: (previewScroll.contentHeight > previewScroll.height ? "↕ scroll    " : "") + "↵ Install rule    Esc Discard"
+            textFormat: Text.PlainText
+            color: root.foreground
+            opacity: 0.45
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
           }
         }
       }

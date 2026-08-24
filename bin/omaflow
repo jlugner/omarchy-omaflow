@@ -85,7 +85,7 @@ stage)
     ) 6>>"$OMAFLOW_STATE_DIR/.staging.lock"
     ;;
   reject)
-    rm -f "$OMAFLOW_STAGING_FILE"
+    ( flock -w 10 6 || exit 0; rm -f "$OMAFLOW_STAGING_FILE" ) 6>>"$OMAFLOW_STATE_DIR/.staging.lock"
     echo "Staged rule discarded"
     ;;
   *)
@@ -144,38 +144,52 @@ agent)
   ;;
 webhooks)
   sub="${1:-list}"
-  hooks=$(jq -c 'select(type == "object")' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '{}')
+  shift || true
   case "$sub" in
   list)
+    show_urls=false
+    [[ ${1:-} == --show-urls ]] && show_urls=true
+    hooks=$(jq -c 'select(type == "object")' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '{}')
     if [[ $(jq 'length' <<<"$hooks") -eq 0 ]]; then
       echo "No webhook endpoints configured."
       echo "Add one:  omaflow webhooks add <name> <url> [json|slack|discord|ntfy|raw]"
-    else
+    elif $show_urls; then
       jq -r 'to_entries[] | "\(.key)  ·  \(.value.format)  ·  \(.value.url)"' <<<"$hooks"
+    else
+      # Webhook URLs are bearer credentials — redact the path/query by default.
+      jq -r 'to_entries[] | "\(.key)  ·  \(.value.format)  ·  \(.value.url | capture("^(?<o>https?://[^/]+)").o // .value.url)/…"' <<<"$hooks"
+      echo "(URLs redacted; use 'omaflow webhooks list --show-urls' for full values)"
     fi
     ;;
-  add)
-    name="${2:?name}" url="${3:?url}" format="${4:-json}"
-    [[ $name =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || { echo "Name must be a short lowercase slug" >&2; exit 2; }
-    [[ $format =~ ^(json|slack|discord|ntfy|raw)$ ]] || { echo "Format must be json|slack|discord|ntfy|raw" >&2; exit 2; }
-    case "$url" in
-    https://*) ;;
-    http://*) echo "warning: $url is not HTTPS — payloads will travel unencrypted" >&2 ;;
-    *) echo "URL must start with https:// or http://" >&2; exit 2 ;;
-    esac
-    jq -c --arg n "$name" --arg u "$url" --arg f "$format" --arg at "$(date --iso-8601=seconds)" \
-      '.[$n] = {url: $u, format: $f, addedAt: $at}' <<<"$hooks" >"$OMAFLOW_WEBHOOKS_FILE.tmp"
-    mv "$OMAFLOW_WEBHOOKS_FILE.tmp" "$OMAFLOW_WEBHOOKS_FILE"
-    echo "Webhook endpoint added: $name ($format)"
-    ;;
-  remove)
-    name="${2:?name}"
-    jq -c --arg n "$name" 'del(.[$n])' <<<"$hooks" >"$OMAFLOW_WEBHOOKS_FILE.tmp"
-    mv "$OMAFLOW_WEBHOOKS_FILE.tmp" "$OMAFLOW_WEBHOOKS_FILE"
-    echo "Webhook endpoint removed: $name"
+  add | remove)
+    # Serialize the read-modify-write so two concurrent edits can't lose one.
+    (
+      flock -w 10 5 || { echo "Webhook config is busy" >&2; exit 1; }
+      hooks=$(jq -c 'select(type == "object")' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '{}')
+      tmp=$(mktemp "$OMAFLOW_CONFIG_DIR/.webhooks.XXXXXX")
+      if [[ $sub == add ]]; then
+        name="${1:?name}" url="${2:?url}" format="${3:-json}"
+        [[ $name =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || { echo "Name must be a short lowercase slug" >&2; exit 2; }
+        [[ $format =~ ^(json|slack|discord|ntfy|raw)$ ]] || { echo "Format must be json|slack|discord|ntfy|raw" >&2; exit 2; }
+        case "$url" in
+        https://*) ;;
+        http://*) echo "warning: $url is not HTTPS — payloads will travel unencrypted" >&2 ;;
+        *) echo "URL must start with https:// or http://" >&2; exit 2 ;;
+        esac
+        jq -c --arg n "$name" --arg u "$url" --arg f "$format" --arg at "$(date --iso-8601=seconds)" \
+          '.[$n] = {url: $u, format: $f, addedAt: $at}' <<<"$hooks" >"$tmp"
+        mv "$tmp" "$OMAFLOW_WEBHOOKS_FILE"
+        echo "Webhook endpoint added: $name ($format)"
+      else
+        name="${1:?name}"
+        jq -c --arg n "$name" 'del(.[$n])' <<<"$hooks" >"$tmp"
+        mv "$tmp" "$OMAFLOW_WEBHOOKS_FILE"
+        echo "Webhook endpoint removed: $name"
+      fi
+    ) 5>>"$OMAFLOW_STATE_DIR/.webhooks.lock"
     ;;
   *)
-    echo "Usage: omaflow webhooks [list | add <name> <url> [format] | remove <name>]" >&2
+    echo "Usage: omaflow webhooks [list [--show-urls] | add <name> <url> [format] | remove <name>]" >&2
     exit 2
     ;;
   esac
