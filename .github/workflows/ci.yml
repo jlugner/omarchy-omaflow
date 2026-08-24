@@ -31,27 +31,12 @@ jobs:
             and (.entryPoints.service | length > 0)
           ' manifest.json
 
-      - name: Tighten runner directory modes for the script trust chain
+      - name: Own the workspace chain for the script trust chain
         run: |
-          sudo chmod go-w /home/runner /home/runner/work "$GITHUB_WORKSPACE/.." || true
+          dir="$PWD"
+          while [ "$dir" != "/" ]; do chown "$(id -u)" "$dir" 2>/dev/null || true; chmod go-w "$dir" 2>/dev/null || true; dir=$(dirname "$dir"); done
+          chown -R "$(id -u)" . 2>/dev/null || true
           chmod -R go-w .
-
-      - name: Trust chain diagnostic
-        run: |
-          ruby -r ./lib/omaflow -e '
-            path = File.join(Dir.pwd, "scripts", "lock-fingerprint-disable")
-            puts "script: #{path}"
-            node = File.realpath(path)
-            while node != "/"
-              st = File.lstat(node)
-              puts format("%o uid=%d %s", st.mode, st.uid, node)
-              node = File.dirname(node)
-            end
-            st = File.lstat("/")
-            puts format("%o uid=%d /", st.mode, st.uid)
-            puts "uid=#{Process.uid}"
-            puts "canonical: #{Omaflow::ScriptRegistry.send(:canonical_path, path).inspect}"
-          '
 
       - name: Vocabulary drift check
         run: tests/test-docs.sh
