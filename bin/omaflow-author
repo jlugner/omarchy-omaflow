@@ -84,7 +84,9 @@ Actions (executed in order):
   {"type":"workspace","number":N}
   {"type":"audio-output","match":"<sink description substring>"}
   {"type":"notify","title":"<short>" (optional),"message":"<text>"}
-  {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL. The literal placeholder {{trigger}} in the message is replaced with a description of the firing event.
+  {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
+In notify and webhook messages the literal placeholder {{trigger}} is replaced with a description of the firing event.
+Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.
 No other trigger, condition, or action types exist. Never invent fields.'
 
 task=$(printf '%s\n' \

@@ -227,7 +227,7 @@ apply_action() { # JSON action -> 0/1, sets $detail
     # and control characters again here so notify-send can never parse a rule
     # value as an option (defense in depth against e.g. exec hints).
     local title
-    detail=$(jq -r '.message' <<<"$action" | tr -d '[:cntrl:]' | sed 's/^-*//')
+    detail=$(omaflow_subst "$(jq -r '.message' <<<"$action")" '{{trigger}}' "$trigger_desc" | tr -d '[:cntrl:]' | sed 's/^-*//')
     title=$(jq -r '.title // "Omaflow"' <<<"$action" | tr -d '[:cntrl:]' | sed 's/^-*//')
     omaflow_notify "${title:-Omaflow}" "${detail:-·}"
     ;;

@@ -28,6 +28,9 @@ jobs:
             and (.entryPoints.service | length > 0)
           ' manifest.json
 
+      - name: Vocabulary drift check
+        run: tests/test-docs.sh
+
       - name: Validator fixtures
         run: tests/test-validate.sh
 
