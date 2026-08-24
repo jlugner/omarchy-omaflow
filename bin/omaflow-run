@@ -180,6 +180,29 @@ apply_action() { # JSON action -> 0/1, sets $detail
     detail="$sink"
     run_cmd pactl set-default-sink "$sink" >/dev/null 2>&1
     ;;
+  grok-message)
+    # Message a persistent, named Grok bot session. The send runs tool-less
+    # (--tools ""), so the bot can never act on this machine — it only
+    # receives the message and updates its own conversation state.
+    local bot msg bots sid reply
+    command -v grok >/dev/null || { detail="grok CLI is not installed"; return 1; }
+    bot=$(jq -r '.bot' <<<"$action")
+    msg=$(jq -r '.message' <<<"$action")
+    msg=${msg//'{{trigger}}'/$trigger_desc}
+    bots=$(jq -c 'select(type == "object")' "$OMAFLOW_BOTS_FILE" 2>/dev/null || echo '{}')
+    sid=$(jq -r --arg b "$bot" '.[$b].sessionId // ""' <<<"$bots")
+    if [[ -z $sid ]]; then
+      sid=$(uuidgen)
+      reply=$(timeout 120 grok -p "$msg" -s "$sid" --tools "" --disable-web-search --output-format plain 2>/dev/null) ||
+        { detail="grok send failed creating bot: $bot"; return 1; }
+      omaflow_write_json "$OMAFLOW_BOTS_FILE" "$(jq -c --arg b "$bot" --arg s "$sid" --arg at "$(now)" \
+        '.[$b] = {sessionId: $s, createdAt: $at}' <<<"$bots")"
+    else
+      reply=$(timeout 120 grok -p "$msg" --resume "$sid" --tools "" --disable-web-search --output-format plain 2>/dev/null) ||
+        { detail="grok send failed for bot: $bot"; return 1; }
+    fi
+    detail="$bot ← $(head -c 120 <<<"$reply" | tr -d '\n')"
+    ;;
   notify)
     # The validator already rejects option-shaped fields; strip leading dashes
     # and control characters again here so notify-send can never parse a rule
