@@ -2,6 +2,8 @@
 
 Agent-authored desktop automations for [Omarchy](https://omarchy.org) — described in English, compiled once into inspectable rules, executed deterministically forever.
 
+The aim is **Apple Shortcuts, for Omarchy** — with one twist: you don't assemble flows in a drag-and-drop editor. You tell your agent what you want, and review what it built.
+
 > "When I dock my ultrawide on weekday mornings, switch to my work theme and open Slack on workspace 3."
 
 Your agent (Codex, Claude Code, or Grok) compiles that into a small, validated JSON rule. Omaflow shows you exactly what it will do before you install it, then runs it with no model in the loop: instant, offline, and identical every time. Every automation lives in one inspectable place — browse them, dry-run them, read the "why did that happen" timeline, disable or delete them cleanly.
