@@ -255,7 +255,9 @@ module Omaflow
     end
 
     def check_webhook(action)
-      err('webhook needs endpoint as a short lowercase slug') unless action['endpoint'].is_a?(String) && action['endpoint'].match?(SHORT_SLUG)
+      unless action['endpoint'].is_a?(String) && action['endpoint'].match?(SHORT_SLUG)
+        err('webhook needs endpoint as a short lowercase slug')
+      end
       err('webhook needs a plain-string message (max 400, no leading dash or control chars)') unless safe_str?(action['message'], max: 400)
       unknown_keys(action, %w[type endpoint message], 'webhook action')
       endpoint = action['endpoint'].to_s
@@ -266,9 +268,7 @@ module Omaflow
 
     def check_notify(action)
       err('notify needs a plain-string message (no leading dash or control chars)') unless safe_str?(action['message'])
-      if action.key?('title')
-        err('notify title must be a plain string (max 60, no leading dash)') unless safe_str?(action['title'], max: 60)
-      end
+      err('notify title must be a plain string (max 60, no leading dash)') if action.key?('title') && !safe_str?(action['title'], max: 60)
       unknown_keys(action, %w[type title message], 'notify action')
     end
   end

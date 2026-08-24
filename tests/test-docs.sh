@@ -6,6 +6,7 @@
 # half-wired. The static list below forces a conscious update on any change.
 
 set -euo pipefail
+trap 'echo "$0: FAILED at line $LINENO" >&2' ERR
 plugin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT

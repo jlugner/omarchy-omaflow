@@ -152,9 +152,9 @@ module Omaflow
         next unless cooldown_over?(rule)
 
         Executor.run(rule['id'], trigger: trigger_description(event), respect_cooldown: true)
-      rescue StandardError => error
+      rescue StandardError => e
         Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule['id'],
-                           'status' => 'error', 'detail' => "#{error.class}: #{error.message}" })
+                           'status' => 'error', 'detail' => "#{e.class}: #{e.message}" })
       end
     end
 

@@ -16,7 +16,7 @@ module Omaflow
     def budget = ENV.fetch('OMAFLOW_AGENT_TIMEOUT', '180')
 
     def resolve(requested = nil)
-      candidates = [requested, ENV['OMAFLOW_AGENT'], configured, omarchy_default]
+      candidates = [requested, ENV.fetch('OMAFLOW_AGENT', nil), configured, omarchy_default]
       explicit = candidates.find do |candidate|
         candidate.to_s != '' && candidate != 'auto' && SUPPORTED.include?(candidate) && Sys.which(candidate)
       end
@@ -45,34 +45,40 @@ module Omaflow
       Dir.mktmpdir('.agent-cwd', Paths.state_dir) { yield it }
     end
 
-    def run_codex(task) = with_scratch_dir do |scratch|
-      out = Tempfile.create('.agent', Paths.state_dir)
-      out.close
-      ok = system('timeout', '--kill-after=10', budget, 'codex', 'exec',
-                  '--skip-git-repo-check', '--sandbox', 'read-only',
-                  '--ephemeral', '--ignore-user-config', '--ignore-rules',
-                  '--cd', scratch,
-                  '--config', 'notify=[]', '--config', 'model_reasoning_effort="low"',
-                  '--output-last-message', out.path, task,
-                  out: File::NULL, err: File::NULL, chdir: scratch)
-      ok ? File.read(out.path) : nil
-    ensure
-      File.delete(out.path) if out && File.exist?(out.path)
+    def run_codex(task)
+      with_scratch_dir do |scratch|
+        out = Tempfile.create('.agent', Paths.state_dir)
+        out.close
+        ok = system('timeout', '--kill-after=10', budget, 'codex', 'exec',
+                    '--skip-git-repo-check', '--sandbox', 'read-only',
+                    '--ephemeral', '--ignore-user-config', '--ignore-rules',
+                    '--cd', scratch,
+                    '--config', 'notify=[]', '--config', 'model_reasoning_effort="low"',
+                    '--output-last-message', out.path, task,
+                    out: File::NULL, err: File::NULL, chdir: scratch)
+        ok ? File.read(out.path) : nil
+      ensure
+        File.delete(out.path) if out && File.exist?(out.path)
+      end
     end
 
-    def run_claude(task) = with_scratch_dir do |scratch|
-      output, ok = Sys.capture('claude', '-p', task, '--output-format', 'text',
-                               '--strict-mcp-config', '--setting-sources', '',
-                               '--disallowedTools', *CLAUDE_DISALLOWED_TOOLS,
-                               timeout: budget, chdir: scratch)
-      ok ? output : nil
+    def run_claude(task)
+      with_scratch_dir do |scratch|
+        output, ok = Sys.capture('claude', '-p', task, '--output-format', 'text',
+                                 '--strict-mcp-config', '--setting-sources', '',
+                                 '--disallowedTools', *CLAUDE_DISALLOWED_TOOLS,
+                                 timeout: budget, chdir: scratch)
+        ok ? output : nil
+      end
     end
 
-    def run_grok(task) = with_scratch_dir do |scratch|
-      output, ok = Sys.capture('grok', '-p', task, '--output-format', 'plain',
-                               '--tools', '', '--disable-web-search',
-                               timeout: budget, chdir: scratch)
-      ok ? output : nil
+    def run_grok(task)
+      with_scratch_dir do |scratch|
+        output, ok = Sys.capture('grok', '-p', task, '--output-format', 'plain',
+                                 '--tools', '', '--disable-web-search',
+                                 timeout: budget, chdir: scratch)
+        ok ? output : nil
+      end
     end
 
     def extract_json(text)

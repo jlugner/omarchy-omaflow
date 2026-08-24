@@ -4,6 +4,7 @@
 # not-currently-present hardware only warns.
 
 set -euo pipefail
+trap 'echo "$0: FAILED at line $LINENO" >&2' ERR
 
 plugin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 test_root=$(mktemp -d)

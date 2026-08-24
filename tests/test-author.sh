@@ -4,6 +4,7 @@
 # extraction from chatty output, the self-repair retry, and stage accept.
 
 set -euo pipefail
+trap 'echo "$0: FAILED at line $LINENO" >&2' ERR
 
 plugin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 test_root=$(mktemp -d)
@@ -13,12 +14,14 @@ fake_bin="$test_root/bin"
 mkdir -p "$fake_bin" "$test_root/config/omarchy/defaults" "$test_root/state"
 
 # Fake codex: first call returns an INVALID rule wrapped in prose, second call
-# (the self-repair retry) returns a valid one. Counts calls.
+# (the self-repair retry) returns a valid one. Counts calls and records its
+# working directory so the empty-scratch isolation guarantee is verifiable.
 cat >"$fake_bin/codex" <<'EOF'
 #!/bin/bash
 count_file="$TEST_ROOT/codex-calls"
 count=$(( $(cat "$count_file" 2>/dev/null || echo 0) + 1 ))
 echo "$count" >"$count_file"
+echo "cwd=$PWD files=$(ls -A | wc -l)" >>"$TEST_ROOT/codex-cwd.log"
 out=""
 prev=""
 for arg in "$@"; do
@@ -64,6 +67,14 @@ run_env jq -e '
   and .rule.createdBy == "codex"
   and .rule.source == "when I join an unknown wifi, enable dnd"
 ' "$state/staging.json" >/dev/null
+
+# Each agent invocation ran in its own empty scratch directory under the
+# state dir, and the directories are gone afterwards.
+[[ $(wc -l <"$test_root/codex-cwd.log") == 2 ]]
+[[ $(grep -c 'files=0' "$test_root/codex-cwd.log") == 2 ]]
+[[ $(grep -oE 'cwd=[^ ]+' "$test_root/codex-cwd.log" | sort -u | wc -l) == 2 ]]
+grep -qE "cwd=$test_root/state/omaflow/.agent-cwd" "$test_root/codex-cwd.log"
+[[ -z $(find "$test_root/state/omaflow" -maxdepth 1 -type d -name '.agent-cwd*' 2>/dev/null) ]]
 
 # Accept installs the rule and reindexes.
 run_env "$plugin_dir/bin/omaflow" stage accept | grep -q "Installed rule: quiet-mode"

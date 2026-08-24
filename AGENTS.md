@@ -8,7 +8,7 @@ The brain is Ruby (stdlib only, no gems), targeting the system `/usr/bin/ruby` t
 
 ## Style
 
-RuboCop defaults, plus: endless methods for short methods (including an endless method whose body is a single block call); `it` for single-arg one-line blocks and `_1`/`_2` for multi-arg one-liners; named parameters on anything multi-line. No comments — code must explain itself; this file carries the invariants instead.
+RuboCop (config in .rubocop.yml, enforced in CI), plus: endless methods for short methods (including an endless method whose body is a single block call); `it` for single-arg one-line blocks and `_1`/`_2` for multi-arg one-liners; named parameters on anything multi-line. No comments — code must explain itself; this file carries the invariants instead.
 
 ## Invariants — do not break
 

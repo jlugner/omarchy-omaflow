@@ -25,9 +25,9 @@ module Omaflow
 
     def detached(*argv) = Process.detach(Process.spawn('setsid', *argv, out: File::NULL, err: File::NULL))
 
-    def notify(*args)
+    def notify(*)
       tool = %w[omarchy-notification-send notify-send].find { which(it) }
-      system(tool, *args, out: File::NULL, err: File::NULL) if tool
+      system(tool, *, out: File::NULL, err: File::NULL) if tool
     end
 
     def subst(haystack, needle, replacement) = haystack.gsub(needle) { replacement }

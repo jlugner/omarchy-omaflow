@@ -1,0 +1,13 @@
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+
+Style/Documentation:
+  Enabled: false
+
+Metrics:
+  Enabled: false
+
+Layout/LineLength:
+  Max: 140

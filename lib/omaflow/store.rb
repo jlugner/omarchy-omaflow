@@ -63,18 +63,20 @@ module Omaflow
       end
     end
 
-    def log_append(entry) = with_lock('.log.lock') do
-      File.open(Paths.log_file, 'a', 0o600) { it.puts(JSON.generate(entry)) }
-      lines = File.readlines(Paths.log_file)
-      if lines.size > 500
-        tmp = "#{Paths.log_file}.#{Process.pid}"
-        File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.write(lines.last(400).join) }
-        File.rename(tmp, Paths.log_file)
+    def log_append(entry)
+      with_lock('.log.lock') do
+        File.open(Paths.log_file, 'a', 0o600) { it.puts(JSON.generate(entry)) }
+        lines = File.readlines(Paths.log_file)
+        if lines.size > 500
+          tmp = "#{Paths.log_file}.#{Process.pid}"
+          File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.write(lines.last(400).join) }
+          File.rename(tmp, Paths.log_file)
+        end
       end
     end
 
     def rules
-      Dir.glob(File.join(Paths.rules_dir, '*.json')).sort.filter_map do |path|
+      Dir.glob(File.join(Paths.rules_dir, '*.json')).filter_map do |path|
         rule = read_json(path, {})
         rule.empty? ? nil : rule
       end
@@ -82,24 +84,29 @@ module Omaflow
 
     def reindex
       cooldowns = read_json(Paths.cooldowns_file, {})
-      indexed = rules.map do |rule|
-        {
-          'id' => rule['id'],
-          'name' => rule['name'],
-          'enabled' => rule['enabled'],
-          'triggerSummary' => trigger_summary(rule['trigger'] || {}),
-          'actionsSummary' => (rule['actions'] || []).map { it['type'] }.join(', '),
-          'actionCount' => (rule['actions'] || []).size,
-          'conditionCount' => (rule['conditions'] || []).size,
-          'source' => rule['source'].to_s,
-          'lastFired' => cooldowns.dig(rule['id'], 'lastFiredAt').to_s
-        }
-      end
+      indexed = rules.map { index_entry(it, cooldowns) }
       write_json(Paths.index_file, { 'generatedAt' => Sys.now_iso, 'rules' => indexed.sort_by { it['name'].to_s } })
     end
 
+    def index_entry(rule, cooldowns)
+      trigger = rule['trigger'].is_a?(Hash) ? rule['trigger'] : {}
+      actions = rule['actions'].is_a?(Array) ? rule['actions'].grep(Hash) : []
+      conditions = rule['conditions'].is_a?(Array) ? rule['conditions'] : []
+      {
+        'id' => rule['id'].to_s,
+        'name' => rule['name'].is_a?(String) ? rule['name'] : rule['id'].to_s,
+        'enabled' => rule['enabled'] == true,
+        'triggerSummary' => trigger_summary(trigger),
+        'actionsSummary' => actions.map { it['type'].to_s }.join(', '),
+        'actionCount' => actions.size,
+        'conditionCount' => conditions.size,
+        'source' => rule['source'].to_s,
+        'lastFired' => cooldowns.dig(rule['id'], 'lastFiredAt').to_s
+      }
+    end
+
     def trigger_summary(trigger)
-      match = trigger['match'] || {}
+      match = trigger['match'].is_a?(Hash) ? trigger['match'] : {}
       suffix =
         if match['description'] then ": #{match['description']}"
         elsif match['name'] then ": #{match['name']}"

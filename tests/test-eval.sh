@@ -4,6 +4,7 @@
 # event, condition filtering, cooldown, disabled rules, and rollback on failure.
 
 set -euo pipefail
+trap 'echo "$0: FAILED at line $LINENO" >&2' ERR
 
 plugin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 test_root=$(mktemp -d)
@@ -270,6 +271,13 @@ if run_env "$plugin_dir/bin/omaflow" disable broken 2>/dev/null; then
   exit 1
 fi
 [[ $(cat "$rules_dir/broken.json") == "not json" ]]
+
+# A structurally invalid rule (valid JSON, wrong shapes) must not crash
+# indexing: the list still renders, showing the malformed rule inertly.
+echo '{"id":"mangled","actions":"oops","trigger":"nope","enabled":"yes"}' >"$rules_dir/mangled.json"
+listing=$(run_env "$plugin_dir/bin/omaflow" list)
+grep -q '○ mangled' <<<"$listing"
+rm -f "$rules_dir/mangled.json" "$rules_dir/broken.json"
 
 # 14. A vanished mains probe preserves battery state instead of fabricating
 #     an AC transition; the state survives in domains.json unchanged.

@@ -11,12 +11,15 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm jq git util-linux findutils ruby
+        run: pacman -Syu --noconfirm jq git util-linux findutils ruby rubocop
 
       - uses: actions/checkout@v4
 
       - name: Syntax-check sources
         run: for f in bin/* lib/omaflow.rb lib/omaflow/*.rb; do ruby -c "$f" >/dev/null; done && bash -n tests/*.sh
+
+      - name: Lint
+        run: rubocop --no-color lib bin
 
       - name: Manifest sanity check
         run: |

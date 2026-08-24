@@ -149,7 +149,9 @@ module Omaflow
 
       value = begin
         parsed = JSON.parse(output)
-        parsed.is_a?(Hash) ? (parsed['enabled'] ? 'on' : 'off') : nil
+        if parsed.is_a?(Hash)
+          parsed['enabled'] ? 'on' : 'off'
+        end
       rescue StandardError
         %w[on off].include?(output.strip) ? output.strip : nil
       end
@@ -186,8 +188,8 @@ module Omaflow
         end
         detail, ok = begin
           send(HANDLERS.fetch(action['type']), action)
-        rescue StandardError => error
-          ["exception: #{error.class}: #{error.message}", false]
+        rescue StandardError => e
+          ["exception: #{e.class}: #{e.message}", false]
         end
         results << { 'type' => action['type'], 'detail' => detail, 'ok' => ok }
         return [results, 'failed'] unless ok
@@ -304,7 +306,7 @@ module Omaflow
     end
 
     def apply_notify(action)
-      sanitize = ->(text) { text.to_s.gsub(/[[:cntrl:]]/, "").sub(/\A-+/, "") }
+      sanitize = ->(text) { text.to_s.gsub(/[[:cntrl:]]/, '').sub(/\A-+/, '') }
       message = sanitize.call(Sys.subst(action['message'], '{{trigger}}', @trigger_desc))
       title = sanitize.call(action.fetch('title', 'Omaflow'))
       Sys.notify(title.empty? ? 'Omaflow' : title, message.empty? ? '·' : message)

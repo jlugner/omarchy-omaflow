@@ -13,7 +13,7 @@ module Omaflow
       application_dirs.each do |dir|
         next unless Dir.exist?(dir)
 
-        entries = Dir.glob(File.join(dir, '*.desktop')).sort
+        entries = Dir.glob(File.join(dir, '*.desktop'))
         found = entries.find { desktop_name?(it, app) } ||
                 entries.find { File.basename(it) == "#{app}.desktop" } ||
                 entries.find { File.basename(it).downcase.include?(app.downcase) }

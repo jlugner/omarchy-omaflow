@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'fileutils'
+
 module Omaflow
   module CLI
     HELP = <<~HELP
@@ -105,7 +107,7 @@ module Omaflow
       when 'show' then puts JSON.pretty_generate(Store.read_json(Paths.staging_file, {}))
       when 'accept' then return stage_accept
       when 'reject'
-        Store.with_lock('.staging.lock', timeout: 10) { File.delete(Paths.staging_file) if File.exist?(Paths.staging_file) }
+        Store.with_lock('.staging.lock', timeout: 10) { FileUtils.rm_f(Paths.staging_file) }
         puts 'Staged rule discarded'
       else
         warn 'Usage: omaflow stage <accept|reject|show>'
@@ -179,6 +181,7 @@ module Omaflow
         end
       end
       return Executor.revert(revert_id) if revert_id
+
       unless rule_id
         warn 'Usage: omaflow-run <rule-id> [--dry-run] [--trigger d] | --revert <exec-id>'
         return 2
@@ -199,6 +202,9 @@ module Omaflow
       rule = begin
         Store.load_json!(path, {})
       rescue StandardError
+        nil
+      end
+      unless rule
         warn "Rule file is not valid JSON: #{path}"
         return 1
       end
