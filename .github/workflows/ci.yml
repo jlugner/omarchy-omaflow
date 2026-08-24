@@ -36,6 +36,23 @@ jobs:
           sudo chmod go-w /home/runner /home/runner/work "$GITHUB_WORKSPACE/.." || true
           chmod -R go-w .
 
+      - name: Trust chain diagnostic
+        run: |
+          ruby -r ./lib/omaflow -e '
+            path = File.join(Dir.pwd, "scripts", "lock-fingerprint-disable")
+            puts "script: #{path}"
+            node = File.realpath(path)
+            while node != "/"
+              st = File.lstat(node)
+              puts format("%o uid=%d %s", st.mode, st.uid, node)
+              node = File.dirname(node)
+            end
+            st = File.lstat("/")
+            puts format("%o uid=%d /", st.mode, st.uid)
+            puts "uid=#{Process.uid}"
+            puts "canonical: #{Omaflow::ScriptRegistry.send(:canonical_path, path).inspect}"
+          '
+
       - name: Vocabulary drift check
         run: tests/test-docs.sh
 
