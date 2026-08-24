@@ -137,7 +137,55 @@ TEST_HYPRCTL_FAIL=1 run_env "$plugin_dir/bin/omaflow-eval" test
 ! grep -q 'omarchy-notification-send.*undocked' "$calls"
 run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null
 
-# 8. Corrupt domain state quarantines and re-baselines instead of stalling.
+# 8. webhook: rules reference named endpoints from the user's allowlist;
+#    formats shape the body; {{trigger}} is substituted; unknown names fail
+#    validation before anything runs.
+cat >"$fake_bin/curl" <<'EOF'
+#!/bin/bash
+echo "curl $*" >>"$TEST_CALLS"
+EOF
+chmod +x "$fake_bin/curl"
+export TEST_CALLS="$calls"
+mkdir -p "$test_root/config/omaflow"
+cat >"$test_root/config/omaflow/webhooks.json" <<'EOF'
+{"team-slack": {"url": "https://hooks.example.com/T/B/x", "format": "slack"},
+ "phone": {"url": "https://ntfy.example.com/topic", "format": "ntfy"}}
+EOF
+cat >"$rules_dir/hook-rule.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "hook-rule", "name": "Ping team", "enabled": true,
+  "trigger": {"type": "manual"},
+  "actions": [
+    {"type": "webhook", "endpoint": "team-slack", "message": "Desktop: {{trigger}}"},
+    {"type": "webhook", "endpoint": "phone", "message": "ping"}
+  ],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-run" hook-rule --trigger "wifi-connected ssid=Office"
+grep -q 'curl.*https://hooks.example.com/T/B/x' "$calls"
+grep -q -- '--data-binary {"text":"Desktop: wifi-connected ssid=Office"}' "$calls"
+grep -q 'Content-Type: text/plain' "$calls"
+grep -q -- '--data-binary ping ' "$calls"
+run_env jq -e '.status == "ok"' <(grep '"ruleId":"hook-rule"' "$state/log.jsonl" | tail -1) >/dev/null
+
+cat >"$rules_dir/bad-hook.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "bad-hook", "name": "Bad", "enabled": true,
+  "trigger": {"type": "manual"},
+  "actions": [{"type": "webhook", "endpoint": "not-configured", "message": "x"}],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+if run_env "$plugin_dir/bin/omaflow-run" bad-hook 2>/dev/null; then
+  echo "unknown endpoint unexpectedly ran" >&2
+  exit 1
+fi
+! grep -q curl "$calls"
+
+# 9. Corrupt domain state quarantines and re-baselines instead of stalling.
 echo 'not json' >"$state/domains.json"
 run_env "$plugin_dir/bin/omaflow-eval" test
 run_env jq -e '.monitors | length == 2' "$state/domains.json" >/dev/null

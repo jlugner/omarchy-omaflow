@@ -8,6 +8,8 @@ Your agent (Codex, Claude Code, or Grok) compiles that into a small, validated J
 
 **The test Omaflow holds itself to:** you can inspect, test, disable, roll back, and move any automation to another machine — without reopening an agent.
 
+![The Omaflow inspector: rules with live status and the activity timeline that explains every firing](preview.jpg)
+
 ## Requirements
 
 - Omarchy 4 with `omarchy-shell`
@@ -55,15 +57,25 @@ omaflow author "on battery, enable dnd and dim ambitions"
 omaflow stage show|accept|reject
 omaflow list · run <id> [--dry-run] · enable|disable|delete <id>
 omaflow log · revert <exec-id> · agent [codex|claude|grok|auto] · poke
+omaflow webhooks [add <name> <url> [format] | remove <name>]
 ```
 
-## What rules can do (v0.1)
+## What rules can do (v0.2)
 
 **Triggers:** manual · time of day (+ weekdays) · monitor connected/disconnected · wifi connected (by name, any, or *never seen before*) / disconnected · switched to AC/battery.
 
 **Conditions:** time window · weekday · on AC/battery · monitor present · on a given wifi.
 
-**Actions:** set theme · DND on/off · nightlight on/off · stay-awake on/off · launch app (optionally on a workspace) · switch workspace · set audio output · send a notification.
+**Actions:** set theme · DND on/off · nightlight on/off · stay-awake on/off · launch app (optionally on a workspace) · switch workspace · set audio output · send a notification · **post to a webhook**.
+
+Webhooks reach anything with an inbox — Slack, Discord, [ntfy](https://ntfy.sh) to your phone, Home Assistant, or an AI teammate watching a channel. Rules never contain URLs: they reference **named endpoints** you configure by hand, so an automation can only ever send where you've explicitly allowed —
+
+```bash
+omaflow webhooks add team-slack https://hooks.slack.com/services/… slack
+omaflow webhooks add phone https://ntfy.sh/your-topic ntfy
+```
+
+Formats shape the body per target (`slack`, `discord`, `ntfy`, `raw`, or the default `json` envelope with message, rule, trigger, and timestamp). `{{trigger}}` in the message expands to the firing event: *"when I join the office wifi, post 'Jesper is in — {{trigger}}' to team-slack."*
 
 There is deliberately **no shell action**: the agent can only emit typed, allowlisted actions, and `omaflow-validate` gates every rule — schema-checked and referentially checked against your machine (the theme exists, the app has a desktop entry) — both at install time and again before every run.
 
@@ -75,7 +87,7 @@ There is deliberately **no shell action**: the agent can only emit typed, allowl
 - Authoring (`bin/omaflow-author`) hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps), validates the result, retries once with the validator's errors on failure, and stages it — `stage accept` is the only path into the rules directory.
 - Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > **Omarchy's default agent** (`omarchy-default-agent`) > first installed of codex/claude/grok.
 
-Nothing leaves your machine at trigger time. Authoring sends your description and the inventory lists above to your chosen agent, only when you ask — with the agent's tools, MCP servers, and web access disabled as far as each CLI allows (`codex --sandbox read-only`, `claude --strict-mcp-config --disallowedTools …`, `grok --tools "" --disable-web-search`) and a hard timeout. The validator additionally rejects option-shaped strings (leading dashes, control characters) in every field that reaches a command line, so a prompt-injected rule can't smuggle flags — for example into notification exec hints.
+Nothing leaves your machine at trigger time — except what a `webhook` action posts, and only to endpoints you added yourself. Authoring sends your description and the inventory lists above to your chosen agent, only when you ask — with the agent's tools, MCP servers, and web access disabled as far as each CLI allows (`codex --sandbox read-only`, `claude --strict-mcp-config --disallowedTools …`, `grok --tools "" --disable-web-search`) and a hard timeout. The validator additionally rejects option-shaped strings (leading dashes, control characters) in every field that reaches a command line, so a prompt-injected rule can't smuggle flags — for example into notification exec hints.
 
 ## Verify
 

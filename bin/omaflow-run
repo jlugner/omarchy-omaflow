@@ -180,6 +180,36 @@ apply_action() { # JSON action -> 0/1, sets $detail
     detail="$sink"
     run_cmd pactl set-default-sink "$sink" >/dev/null 2>&1
     ;;
+  webhook)
+    # POST to a named endpoint from the user-managed allowlist. Rules never
+    # carry URLs — the agent can only reference endpoints the user added by
+    # hand with `omaflow webhooks add`, so a compromised rule cannot choose
+    # where data goes.
+    local hook_name msg hooks hook url format body
+    hook_name=$(jq -r '.endpoint' <<<"$action")
+    msg=$(jq -r '.message' <<<"$action")
+    msg=${msg//'{{trigger}}'/$trigger_desc}
+    hooks=$(jq -c 'select(type == "object")' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '{}')
+    hook=$(jq -c --arg n "$hook_name" '.[$n] // empty' <<<"$hooks")
+    [[ -n $hook ]] || { detail="no webhook endpoint named: $hook_name"; return 1; }
+    url=$(jq -r '.url' <<<"$hook")
+    format=$(jq -r '.format // "json"' <<<"$hook")
+    case "$format" in
+    slack) body=$(jq -cn --arg t "$msg" '{text: $t}') ;;
+    discord) body=$(jq -cn --arg t "$msg" '{content: $t}') ;;
+    ntfy | raw) body="$msg" ;;
+    *) body=$(jq -cn --arg m "$msg" --arg r "$rule_id" --arg trig "$trigger_desc" --arg at "$(now)" \
+      '{message: $m, rule: $r, trigger: $trig, at: $at}') ;;
+    esac
+    if [[ $format == ntfy || $format == raw ]]; then
+      curl -fsS --max-time 15 -X POST -H 'Content-Type: text/plain' \
+        --data-binary "$body" -- "$url" >/dev/null 2>&1 || { detail="POST to $hook_name failed"; return 1; }
+    else
+      curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data-binary "$body" -- "$url" >/dev/null 2>&1 || { detail="POST to $hook_name failed"; return 1; }
+    fi
+    detail="$hook_name ($format)"
+    ;;
   notify)
     # The validator already rejects option-shaped fields; strip leading dashes
     # and control characters again here so notify-send can never parse a rule

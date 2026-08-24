@@ -167,6 +167,16 @@ while IFS= read -r action; do
       fi
     fi
     ;;
+  webhook)
+    acheck '.endpoint | type == "string" and test("^[a-z0-9][a-z0-9-]{0,30}$")' || err "webhook needs endpoint as a short lowercase slug"
+    acheck '.message | type == "string" and length > 0 and length <= 400 and (explode | all(. >= 32)) and (startswith("-") | not)' ||
+      err "webhook needs a plain-string message (max 400, no leading dash or control chars)"
+    akeys_ok '["type","endpoint","message"]'
+    hook_name=$(jq -r '.endpoint // ""' <<<"$action")
+    if [[ -n $hook_name ]] && ! jq -e --arg n "$hook_name" 'type == "object" and has($n)' "$OMAFLOW_WEBHOOKS_FILE" >/dev/null 2>&1; then
+      err "no webhook endpoint named '$hook_name' — add it with: omaflow webhooks add $hook_name <url> [format]"
+    fi
+    ;;
   notify)
     # Notification fields reach notify-send argv; a leading dash could smuggle
     # options (e.g. a click-exec hint), so they are held to safe strings.

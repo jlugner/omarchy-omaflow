@@ -56,6 +56,7 @@ apps=$(find "${XDG_DATA_HOME:-$HOME/.local/share}/applications" /usr/share/appli
   -maxdepth 1 -name '*.desktop' 2>/dev/null -exec sed -n 's/^Name=//p;q' {} \; 2>/dev/null |
   sort -u | head -150 | jq -Rs 'split("\n") | map(select(length > 0))' || echo '[]')
 current_ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -1 || true)
+webhook_names=$(jq -c 'if type == "object" then keys else [] end' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '[]')
 
 request_json=$(jq -Rn --arg v "$request" '$v')
 
@@ -83,6 +84,7 @@ Actions (executed in order):
   {"type":"workspace","number":N}
   {"type":"audio-output","match":"<sink description substring>"}
   {"type":"notify","title":"<short>" (optional),"message":"<text>"}
+  {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL. The literal placeholder {{trigger}} in the message is replaced with a description of the firing event.
 No other trigger, condition, or action types exist. Never invent fields.'
 
 task=$(printf '%s\n' \
@@ -98,6 +100,7 @@ task=$(printf '%s\n' \
   "Audio sinks: $sinks" \
   "Installed apps: $apps" \
   "Current wifi SSID: $(jq -Rn --arg v "$current_ssid" '$v')" \
+  "Configured webhook endpoints (the only valid webhook endpoint values): $webhook_names" \
   '' \
   'Pick the closest trigger and actions that the vocabulary supports; if part of the request is unsupported, cover what you can with supported actions (a notify action may explain the rest). Set source to the user request verbatim.' \
   'Respond with ONLY the rule JSON object. No markdown, no commentary.')

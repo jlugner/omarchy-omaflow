@@ -13,6 +13,7 @@
 #   omaflow log [n]
 #   omaflow validate <file|id>
 #   omaflow agent [backend]     show or set the authoring backend
+#   omaflow webhooks [add <name> <url> [format] | remove <name>]
 #   omaflow poke                run one engine evaluation now
 
 set -euo pipefail
@@ -140,6 +141,44 @@ agent)
     mv "$OMAFLOW_CONFIG_FILE.tmp" "$OMAFLOW_CONFIG_FILE"
     echo "Authoring agent set to: $backend"
   fi
+  ;;
+webhooks)
+  sub="${1:-list}"
+  hooks=$(jq -c 'select(type == "object")' "$OMAFLOW_WEBHOOKS_FILE" 2>/dev/null || echo '{}')
+  case "$sub" in
+  list)
+    if [[ $(jq 'length' <<<"$hooks") -eq 0 ]]; then
+      echo "No webhook endpoints configured."
+      echo "Add one:  omaflow webhooks add <name> <url> [json|slack|discord|ntfy|raw]"
+    else
+      jq -r 'to_entries[] | "\(.key)  ·  \(.value.format)  ·  \(.value.url)"' <<<"$hooks"
+    fi
+    ;;
+  add)
+    name="${2:?name}" url="${3:?url}" format="${4:-json}"
+    [[ $name =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || { echo "Name must be a short lowercase slug" >&2; exit 2; }
+    [[ $format =~ ^(json|slack|discord|ntfy|raw)$ ]] || { echo "Format must be json|slack|discord|ntfy|raw" >&2; exit 2; }
+    case "$url" in
+    https://*) ;;
+    http://*) echo "warning: $url is not HTTPS — payloads will travel unencrypted" >&2 ;;
+    *) echo "URL must start with https:// or http://" >&2; exit 2 ;;
+    esac
+    jq -c --arg n "$name" --arg u "$url" --arg f "$format" --arg at "$(date --iso-8601=seconds)" \
+      '.[$n] = {url: $u, format: $f, addedAt: $at}' <<<"$hooks" >"$OMAFLOW_WEBHOOKS_FILE.tmp"
+    mv "$OMAFLOW_WEBHOOKS_FILE.tmp" "$OMAFLOW_WEBHOOKS_FILE"
+    echo "Webhook endpoint added: $name ($format)"
+    ;;
+  remove)
+    name="${2:?name}"
+    jq -c --arg n "$name" 'del(.[$n])' <<<"$hooks" >"$OMAFLOW_WEBHOOKS_FILE.tmp"
+    mv "$OMAFLOW_WEBHOOKS_FILE.tmp" "$OMAFLOW_WEBHOOKS_FILE"
+    echo "Webhook endpoint removed: $name"
+    ;;
+  *)
+    echo "Usage: omaflow webhooks [list | add <name> <url> [format] | remove <name>]" >&2
+    exit 2
+    ;;
+  esac
   ;;
 poke)
   exec "$bin_dir/omaflow-eval" cli
