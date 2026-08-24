@@ -38,7 +38,8 @@ module Omaflow
         {"type":"script","name":"<allowed script name>"} — runs one exact packaged or user-approved executable. name must be from the allowed scripts inventory; no path, arguments, or shell text are permitted in a rule.
         {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
-      In notify and webhook messages {{trigger}} is replaced with a description of the firing event. Every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings.
+        {"type":"agent","task":"<what to do>","can":["close-window"|"focus-window"|"move-window-to-workspace"|"notify"],"timeoutSeconds":N (optional, default 120)} — runs an agent at trigger time and costs tokens; task max 300, can is non-empty, timeoutSeconds 10..180, and cooldownSeconds at least 60. Grant only the minimum verbs needed.
+      In notify and webhook messages and agent tasks {{trigger}} is replaced with a description of the firing event. In notify and webhook messages every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings; agent tasks support only {{trigger}}.
       Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.
       No other trigger, condition, or action types exist. Never invent fields.
     DOC

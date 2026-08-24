@@ -4,14 +4,14 @@ Apple Shortcuts, for [Omarchy](https://omarchy.org). Except you don't build the 
 
 > "When I dock my ultrawide on weekday mornings, switch to my work theme and open Slack on workspace 3."
 
-Codex, Claude Code, or Grok turns that into a small JSON rule. From then on no AI is involved: a tiny Ruby engine runs the rule instantly, offline, the same way every time. All your automations live in one place. Browse them, dry-run them, disable them, and read the timeline that explains every firing. Rules are plain files, so you can inspect, test, and move them to another machine without ever reopening an agent.
+Codex, Claude Code, or Grok turns that into a small JSON rule. Most rules then run without AI; an explicit agent action can instead ask the configured agent to choose window targets at trigger time. All your automations live in one place. Browse them, dry-run them, disable them, and read the timeline that explains every firing. Rules are plain files, so you can inspect, test, and move them to another machine.
 
 ![The Omaflow inspector: rules with live status and the activity timeline](preview.jpg)
 
 ## Requirements
 
 - Omarchy 4 with `omarchy-shell`
-- One agent CLI, signed in: [Codex](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code), or Grok. Used to write rules, never to run them.
+- One agent CLI, signed in: [Codex](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code), or Grok. Used to write rules and by explicit agent actions.
 - `ruby`, `hyprctl`, `gdbus`, `nmcli`, `pactl` (all on stock Omarchy)
 
 ## Install
@@ -67,7 +67,9 @@ omaflow webhooks [add <name> <url> [format] | remove <name>]
 
 **Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · on a given wifi.
 
-**Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · run an allowed script · send a notification · post to a webhook.
+**Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · run an allowed script · send a notification · post to a webhook · ask an agent to choose window targets within a capability envelope.
+
+An agent action sees the current window addresses, classes, titles, and workspaces, then may propose only the verbs granted in the rule: close, focus, move to workspace, or notify. Omaflow validates the whole proposal against that window list and capability envelope before executing anything; one invalid operation rejects all of it.
 
 Webhooks reach anything with an inbox: Slack, Discord, [ntfy](https://ntfy.sh) on your phone, Home Assistant. Rules never contain URLs. They point at named endpoints you add yourself, so a rule can only send where you've allowed:
 
@@ -101,11 +103,11 @@ Two packaged scripts, `lock-fingerprint-enable` and `lock-fingerprint-disable`, 
 
 - Rules are one JSON file each in `~/.config/omaflow/rules/`, portable config that syncs like your dotfiles. Each rule keeps your original request in its `source` field.
 - A small shell service forwards change signals (Hyprland monitor events, UPower lid changes, `nmcli monitor`, power state, and a 45s heartbeat) to `bin/omaflow-eval`, a state-diff engine: it re-reads reality, diffs against its last snapshot, and fires matching rules. Duplicate signals cost nothing. First run stores a hardware baseline and fires no hardware events.
-- `bin/omaflow-run` executes actions through existing Omarchy surfaces (`omarchy theme set`, shell IPC, `hyprctl`, `pactl`). Revertible actions are snapshotted first and rolled back after failure. `omaflow revert <exec-id>` rejects runs with nothing revertible and reports mixed reversible/irreversible runs as partial.
+- `bin/omaflow-run` executes actions through existing Omarchy surfaces (`omarchy theme set`, shell IPC, `hyprctl`, `pactl`). An agent action uses the same tool-less agent runner as authoring, then validates its proposed operations before dispatch. Revertible actions are snapshotted first and rolled back after failure. `omaflow revert <exec-id>` rejects runs with nothing revertible and reports mixed reversible/irreversible runs as partial.
 - Authoring hands the agent the schema plus your machine's real inventory (themes, monitors, sinks, apps, allowed script names), validates the result, and stages it. `stage accept` is the only way into the rules directory.
 - Agent choice: `--agent` flag > `OMAFLOW_AGENT` > `omaflow agent <backend>` > Omarchy's default agent > first installed of codex/claude/grok.
 
-Nothing leaves your machine at trigger time, except what a webhook action posts to endpoints you added. Window titles live in `~/.local/state/omaflow/domains.json`, which is written with mode `0600`. Authoring sends your description and the inventory above to your agent, with tools, MCP servers, and web access turned off as far as each CLI allows, plus a hard timeout. The validator also rejects option-shaped strings (leading dashes, control characters) in any field that reaches a command line.
+Nothing leaves your machine at trigger time unless a webhook or agent action explicitly says so. Window titles live in `~/.local/state/omaflow/domains.json`, which is written with mode `0600`. Authoring sends your description and the inventory above to your agent; agent actions send their task and bounded window context. Both run with tools, MCP servers, and web access turned off as far as each CLI allows, plus a hard timeout. The validator also rejects option-shaped strings (leading dashes, control characters) in any field that reaches a command line.
 
 ## Verify
 
@@ -114,6 +116,7 @@ omarchy plugin validate ~/.config/omarchy/plugins/jesperlugner.omaflow
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-validate.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-eval.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-author.sh
+~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-agent-action.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-hardening.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-setup.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-scripts.sh

@@ -40,7 +40,8 @@ action workspace
 action audio-output
 action script
 action webhook
-action notify"
+action notify
+action agent"
 
 actual=$(HOME="$test_root" XDG_CONFIG_HOME="$test_root/config" XDG_STATE_HOME="$test_root/state" \
   "$plugin_dir/bin/omaflow" vocabulary)
@@ -53,6 +54,7 @@ fi
 /usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
   vocab = Omaflow::Vocabulary
   abort "executor handlers != vocabulary actions" unless Omaflow::Executor::HANDLERS.keys.sort == vocab::ACTIONS.sort
+  abort "agent ops != vocabulary agent ops" unless Omaflow::Executor::OPS.keys.sort == vocab::AGENT_OPS.sort
   abort "executor snapshots reference unknown actions" unless (Omaflow::Executor::SNAPSHOTTED.keys - vocab::ACTIONS).empty?
   abort "validator action checks != vocabulary" unless Omaflow::Validator::ACTION_CHECKS.keys.sort == vocab::ACTIONS.sort
   abort "validator trigger checks != vocabulary" unless Omaflow::Validator::TRIGGER_CHECKS.keys.sort == vocab::TRIGGERS.sort

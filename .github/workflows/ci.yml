@@ -50,6 +50,9 @@ jobs:
       - name: Authoring pipeline test
         run: tests/test-author.sh
 
+      - name: Agent action test
+        run: tests/test-agent-action.sh
+
       - name: Resource hardening test
         run: tests/test-hardening.sh
 

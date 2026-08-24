@@ -31,11 +31,11 @@ module Omaflow
       nil
     end
 
-    def run(backend, task)
+    def run(backend, task, timeout: budget)
       answer = case backend
-               when 'codex' then run_codex(task)
-               when 'claude' then run_claude(task)
-               when 'grok' then run_grok(task)
+               when 'codex' then run_codex(task, timeout:)
+               when 'claude' then run_claude(task, timeout:)
+               when 'grok' then run_grok(task, timeout:)
                end
       answer&.byteslice(0, OUTPUT_CAP)
     end
@@ -45,11 +45,11 @@ module Omaflow
       Dir.mktmpdir('.agent-cwd', Paths.state_dir) { yield it }
     end
 
-    def run_codex(task)
+    def run_codex(task, timeout:)
       with_scratch_dir do |scratch|
         out = Tempfile.create('.agent', Paths.state_dir)
         out.close
-        ok = system('timeout', '--kill-after=10', budget, 'codex', 'exec',
+        ok = system('timeout', '--kill-after=10', timeout.to_s, 'codex', 'exec',
                     '--skip-git-repo-check', '--sandbox', 'read-only',
                     '--ephemeral', '--ignore-user-config', '--ignore-rules',
                     '--cd', scratch,
@@ -62,21 +62,21 @@ module Omaflow
       end
     end
 
-    def run_claude(task)
+    def run_claude(task, timeout:)
       with_scratch_dir do |scratch|
         output, ok = Sys.capture('claude', '-p', task, '--output-format', 'text',
                                  '--strict-mcp-config', '--setting-sources', '',
                                  '--disallowedTools', *CLAUDE_DISALLOWED_TOOLS,
-                                 timeout: budget, chdir: scratch)
+                                 timeout:, chdir: scratch)
         ok ? output : nil
       end
     end
 
-    def run_grok(task)
+    def run_grok(task, timeout:)
       with_scratch_dir do |scratch|
         output, ok = Sys.capture('grok', '-p', task, '--output-format', 'plain',
                                  '--tools', '', '--disable-web-search',
-                                 timeout: budget, chdir: scratch)
+                                 timeout:, chdir: scratch)
         ok ? output : nil
       end
     end
@@ -91,12 +91,28 @@ module Omaflow
       nil
     end
 
+    def extract_json_array(text)
+      [text, fenced(text), bracketed(text)].each do |candidate|
+        next unless candidate
+
+        parsed = JSON.parse(candidate)
+        return parsed if parsed.is_a?(Array)
+      rescue JSON::ParserError
+        next
+      end
+      nil
+    end
+
     def fenced(text)
       text[/^```[a-z]*\n(.*?)^```/m, 1]
     end
 
     def braced(text)
       text.tr("\n", ' ')[/\{.*\}/m]
+    end
+
+    def bracketed(text)
+      text.tr("\n", ' ')[/\[.*\]/m]
     end
   end
 end

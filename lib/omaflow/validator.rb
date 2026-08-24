@@ -42,7 +42,8 @@ module Omaflow
       'audio-output' => :check_audio_output,
       'script' => :check_script,
       'webhook' => :check_webhook,
-      'notify' => :check_notify
+      'notify' => :check_notify,
+      'agent' => :check_agent
     }.freeze
 
     attr_reader :errors, :warnings
@@ -77,7 +78,7 @@ module Omaflow
 
     def safe_str?(value, max: 200)
       value.is_a?(String) && value.length.between?(1, max) &&
-        value.codepoints.all? { it >= 32 } && !value.start_with?('-')
+        !value.match?(/[[:cntrl:]]/) && !value.start_with?('-')
     end
 
     def present_str?(value, max: 200) = safe_str?(value, max:) && !value.strip.empty?
@@ -350,6 +351,21 @@ module Omaflow
       err('notify needs a plain-string message (no leading dash or control chars)') unless safe_str?(action['message'])
       err('notify title must be a plain string (max 60, no leading dash)') if action.key?('title') && !safe_str?(action['title'], max: 60)
       unknown_keys(action, %w[type title message], 'notify action')
+    end
+
+    def check_agent(action)
+      err('agent task must be a plain string (max 300, no leading dash or control chars)') unless safe_str?(action['task'], max: 300)
+      can = action['can']
+      valid_can = can.is_a?(Array) && !can.empty? && can.uniq == can && (can - Vocabulary::AGENT_OPS).empty?
+      err("agent can must be a non-empty subset of: #{Vocabulary::AGENT_OPS.join(', ')}") unless valid_can
+      timeout = action.fetch('timeoutSeconds', 120)
+      err('agent timeoutSeconds must be an integer 10..180') unless integer_between?(timeout, 10..180)
+      unknown_keys(action, %w[type task can timeoutSeconds], 'agent action')
+      cooldown = @rule.fetch('cooldownSeconds', 60)
+      spacing = 'agent actions need cooldownSeconds of at least 60 for spacing'
+      err(spacing) if cooldown.is_a?(Numeric) && cooldown < 60 && !errors.include?(spacing)
+      warning = 'no supported agent CLI is installed; this agent action cannot run'
+      warn(warning) unless Agent.resolve || warnings.include?(warning)
     end
   end
 end
