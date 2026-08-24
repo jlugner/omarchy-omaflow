@@ -56,7 +56,7 @@ module Omaflow
                     '--config', 'notify=[]', '--config', 'model_reasoning_effort="low"',
                     '--output-last-message', out.path, task,
                     out: File::NULL, err: File::NULL, chdir: scratch)
-        ok ? File.read(out.path) : nil
+        ok ? File.open(out.path) { it.read(OUTPUT_CAP) }.to_s : nil
       ensure
         File.delete(out.path) if out && File.exist?(out.path)
       end

@@ -14,12 +14,30 @@ module Omaflow
       system('timeout', '--kill-after=10', timeout.to_s, *argv, out: File::NULL, err: File::NULL)
     end
 
-    def capture(*argv, timeout: 30, chdir: nil)
+    CAPTURE_MAX_BYTES = 1_048_576
+
+    def capture(*argv, timeout: 30, chdir: nil, max_bytes: CAPTURE_MAX_BYTES)
       options = { err: File::NULL }
       options[:chdir] = chdir if chdir
-      out, status = Open3.capture2('timeout', '--kill-after=10', timeout.to_s, *argv, **options)
-      [out, status.success?]
-    rescue SystemCallError
+      Open3.popen2('timeout', '--kill-after=10', timeout.to_s, *argv, **options) do |stdin, stdout, waiter|
+        stdin.close
+        out = +''
+        overflow = false
+        while (chunk = stdout.read(65_536))
+          out << chunk
+          next if out.bytesize <= max_bytes
+
+          overflow = true
+          break
+        end
+        begin
+          stdout.close
+        rescue IOError
+          nil
+        end
+        [out.byteslice(0, max_bytes).to_s, waiter.value.success? && !overflow]
+      end
+    rescue SystemCallError, IOError
       ['', false]
     end
 

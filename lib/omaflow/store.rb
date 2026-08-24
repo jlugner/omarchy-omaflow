@@ -6,8 +6,21 @@ module Omaflow
   module Store
     module_function
 
+    MAX_JSON_BYTES = 262_144
+    MAX_RULE_FILES = 200
+
+    def safe_read(path, max_bytes: MAX_JSON_BYTES)
+      File.open(path, File::RDONLY | File::NOFOLLOW) do |file|
+        stat = file.stat
+        raise IOError, "not a regular file: #{path}" unless stat.file?
+        raise IOError, "file exceeds #{max_bytes} bytes: #{path}" if stat.size > max_bytes
+
+        file.read(max_bytes).to_s
+      end
+    end
+
     def read_json(path, fallback)
-      parse_json(File.read(path), fallback)
+      parse_json(safe_read(path), fallback)
     rescue StandardError
       fallback
     end
@@ -20,7 +33,7 @@ module Omaflow
     end
 
     def load_json!(path, expected)
-      parsed = JSON.parse(File.read(path))
+      parsed = JSON.parse(safe_read(path))
       raise JSON::ParserError, "#{path} is not a JSON #{expected.class.name.downcase}" unless parsed.instance_of?(expected.class)
 
       parsed
@@ -66,17 +79,21 @@ module Omaflow
     def log_append(entry)
       with_lock('.log.lock') do
         File.open(Paths.log_file, 'a', 0o600) { it.puts(JSON.generate(entry)) }
-        lines = File.readlines(Paths.log_file)
-        if lines.size > 500
+        lines = begin
+          safe_read(Paths.log_file, max_bytes: 4_194_304).lines
+        rescue StandardError
+          nil
+        end
+        if lines.nil? || lines.size > 500
           tmp = "#{Paths.log_file}.#{Process.pid}"
-          File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.write(lines.last(400).join) }
+          File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { it.write((lines || []).last(400).join) }
           File.rename(tmp, Paths.log_file)
         end
       end
     end
 
     def rules
-      Dir.glob(File.join(Paths.rules_dir, '*.json')).filter_map do |path|
+      Dir.glob(File.join(Paths.rules_dir, '*.json')).first(MAX_RULE_FILES).filter_map do |path|
         rule = read_json(path, {})
         rule.empty? ? nil : rule
       end
