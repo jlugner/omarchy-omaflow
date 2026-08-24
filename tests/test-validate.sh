@@ -22,6 +22,7 @@ printf '[Desktop Entry]\nName=Slack\nExec=slack\n' >"$apps_dir/slack.desktop"
 validate() {
   HOME="$test_root" \
   XDG_DATA_HOME="$test_root/share" \
+  OMAFLOW_LID_DIR="${TEST_LID_DIR:-$test_root/no-lid}" \
   PATH="$fake_bin:/usr/bin:/bin" \
     "$plugin_dir/bin/omaflow-validate" "$1"
 }
@@ -93,5 +94,21 @@ grep -q "error: notify needs a plain-string message" "$test_root/evil.out"
 grep -q "error: workspace needs an integer" "$test_root/evil.out"
 grep -q "error: cooldownSeconds must be an integer" "$test_root/evil.out"
 grep -q "error: unknown field in .trigger" "$test_root/evil.out"
+
+lid="$test_root/lid.json"
+cat >"$lid" <<'EOF'
+{
+  "schemaVersion": 1, "id": "lid-rule", "name": "Lid", "enabled": true,
+  "trigger": {"type": "lid-closed"},
+  "conditions": [{"type": "lid-state", "state": "closed"}],
+  "actions": [{"type": "notify", "message": "closed"}], "source": "test"
+}
+EOF
+out=$(validate "$lid")
+[[ $(grep -c '^warn:.*no laptop lid state' <<<"$out") == 1 ]]
+mkdir -p "$test_root/lid/LID0"
+echo 'state: open' >"$test_root/lid/LID0/state"
+out=$(TEST_LID_DIR="$test_root/lid" validate "$lid")
+! grep -q '^warn:.*lid' <<<"$out"
 
 echo "test-validate: ok"

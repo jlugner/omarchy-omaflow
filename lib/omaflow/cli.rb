@@ -18,6 +18,7 @@ module Omaflow
         omaflow log [n]
         omaflow validate <file|id>
         omaflow agent [backend]     show or set the authoring backend
+        omaflow scripts [add <name> <absolute-path> [description] | remove <name>]
         omaflow webhooks [add <name> <url> [format] | remove <name>]
         omaflow vocabulary          list supported trigger/condition/action types
         omaflow poke                run one engine evaluation now
@@ -51,6 +52,7 @@ module Omaflow
       when 'log' then show_log(argv.first)
       when 'validate' then validate_command(argv.first)
       when 'agent' then agent(argv.first)
+      when 'scripts' then scripts(argv)
       when 'webhooks' then webhooks(argv)
       when 'vocabulary' then vocabulary
       when 'poke' then Evaluator.tick('cli')
@@ -274,6 +276,86 @@ module Omaflow
       end
       Store.write_json(Paths.config_file, Store.read_json(Paths.config_file, {}).merge('agent' => backend))
       puts "Authoring agent set to: #{backend}"
+      0
+    end
+
+    def scripts(argv)
+      subcommand = argv.shift || 'list'
+      case subcommand
+      when 'list' then scripts_list
+      when 'add', 'remove' then scripts_edit(subcommand, argv)
+      else
+        warn 'Usage: omaflow scripts [list | add <name> <absolute-path> [description] | remove <name>]'
+        2
+      end
+    end
+
+    def scripts_list
+      ScriptRegistry.entries.sort.each do |name, value|
+        status = ScriptRegistry.available(name) ? '✓' : '!'
+        puts "#{status} #{name}  ·  #{value['source']}  ·  #{ScriptRegistry.description(value)}"
+      end
+      0
+    end
+
+    def scripts_edit(subcommand, argv)
+      result = 1
+      locked = Store.with_lock('.scripts.lock', timeout: 10) do
+        configured = begin
+          File.exist?(Paths.scripts_file) ? Store.load_json!(Paths.scripts_file, {}) : {}
+        rescue StandardError
+          warn "Script config is not valid JSON: #{Paths.scripts_file}"
+          next
+        end
+        result = subcommand == 'add' ? script_add(configured, argv) : script_remove(configured, argv.first)
+      end
+      unless locked
+        warn 'Script config is busy'
+        return 1
+      end
+      result
+    end
+
+    def script_add(configured, argv)
+      name, requested_path, *description_words = argv
+      unless ScriptRegistry.valid_name?(name) && requested_path
+        warn 'Usage: omaflow scripts add <lowercase-name> <absolute-path> [description]'
+        return 2
+      end
+      if ScriptRegistry.built_in?(name)
+        warn "Built-in script names cannot be replaced: #{name}"
+        return 2
+      end
+      path = ScriptRegistry.canonical_path(requested_path) if requested_path.start_with?('/')
+      unless path
+        warn 'Script and its directory must be owner- or root-owned, executable, and not group/world writable; try chmod go-w'
+        return 2
+      end
+      description = description_words.join(' ').strip
+      configured[name] = { 'path' => path, 'description' => description, 'addedAt' => Sys.now_iso }
+      Store.write_json(Paths.scripts_file, configured)
+      ScriptRegistry.reset!
+      puts "Script allowed: #{name}"
+      0
+    end
+
+    def script_remove(configured, name)
+      unless ScriptRegistry.valid_name?(name)
+        warn 'Usage: omaflow scripts remove <name>'
+        return 2
+      end
+      if ScriptRegistry.built_in?(name)
+        warn "Built-in scripts cannot be removed: #{name}"
+        return 2
+      end
+      unless configured.key?(name)
+        warn "No allowed script named: #{name}"
+        return 1
+      end
+      configured.delete(name)
+      Store.write_json(Paths.scripts_file, configured)
+      ScriptRegistry.reset!
+      puts "Script removed: #{name}"
       0
     end
 

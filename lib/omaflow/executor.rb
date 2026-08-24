@@ -14,6 +14,7 @@ module Omaflow
       'launch' => :apply_launch,
       'workspace' => :apply_workspace,
       'audio-output' => :apply_audio_output,
+      'script' => :apply_script,
       'webhook' => :apply_webhook,
       'notify' => :apply_notify
     }.freeze
@@ -61,7 +62,7 @@ module Omaflow
       return 1 if snapshot.nil?
 
       results, status = apply_actions(dry_run:)
-      status = roll_back(snapshot) if status == 'failed'
+      status = roll_back(snapshot, results:) if status == 'failed'
       record_run(results:, status:, dry_run:)
       print_plan(results) if dry_run
       status == 'ok' ? 0 : 1
@@ -81,9 +82,21 @@ module Omaflow
       end
       return self.class.fail_stderr("Snapshot is not valid JSON: #{path}") unless snapshot
 
+      unless snapshot_revertible?(snapshot)
+        detail = 'execution has no revertible actions'
+        Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => exec_id,
+                           'status' => 'not-revertible', 'detail' => detail })
+        return self.class.fail_stderr(detail.capitalize)
+      end
+
       status = restore_snapshot(snapshot)
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => exec_id, 'status' => status })
-      Sys.notify('Omaflow', "Reverted execution #{exec_id} (#{status})")
+      irreversible = snapshot_irreversible_actions(snapshot)
+      status = 'partial' if status == 'ok' && !irreversible.empty?
+      detail = "irreversible actions remain: #{irreversible.join(', ')}" unless irreversible.empty?
+      entry = { 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => exec_id, 'status' => status }
+      entry['detail'] = detail if detail
+      Store.log_append(entry)
+      notify_revert(exec_id, status:, irreversible:)
       status == 'ok' ? 0 : 1
     end
 
@@ -102,7 +115,9 @@ module Omaflow
     def action_types = (@rule['actions'] || []).map { it['type'] }
 
     def capture_snapshot
-      snapshot = {}
+      revertible = action_types.select { SNAPSHOTTED.key?(it) }.uniq
+      irreversible = action_types.reject { SNAPSHOTTED.key?(it) }.uniq
+      snapshot = { '_meta' => { 'revertibleActions' => revertible, 'irreversibleActions' => irreversible } }
       SNAPSHOTTED.each do |type, capture|
         next unless action_types.include?(type)
 
@@ -197,15 +212,40 @@ module Omaflow
       [results, 'ok']
     end
 
-    def roll_back(snapshot)
+    def roll_back(snapshot, results:)
       revert_status = restore_snapshot(snapshot)
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => @exec_id, 'status' => revert_status })
+      irreversible = results.filter_map do |result|
+        result['type'] if result['ok'] && !SNAPSHOTTED.key?(result['type'])
+      end.uniq
+      revert_status = 'partial' if revert_status == 'ok' && !irreversible.empty?
+      entry = { 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => @exec_id, 'status' => revert_status }
+      entry['detail'] = "irreversible actions remain: #{irreversible.join(', ')}" unless irreversible.empty?
+      Store.log_append(entry)
       if revert_status == 'ok'
         Sys.notify('Omaflow rule failed', "#{rule_name} — revertible changes rolled back")
       else
         Sys.notify('Omaflow rule failed', "#{rule_name} — rollback incomplete, see omaflow log")
       end
       'failed'
+    end
+
+    def snapshot_revertible?(snapshot) = snapshot.keys.any? { it != '_meta' }
+
+    def snapshot_irreversible_actions(snapshot)
+      meta = snapshot['_meta']
+      meta.is_a?(Hash) ? Array(meta['irreversibleActions']).grep(String) : []
+    end
+
+    def notify_revert(exec_id, status:, irreversible:)
+      message =
+        if status == 'ok'
+          "Reverted execution #{exec_id}"
+        elsif !irreversible.empty?
+          "Reverted only reversible changes in #{exec_id}; #{irreversible.join(', ')} remains applied"
+        else
+          "Revert of #{exec_id} was incomplete"
+        end
+      Sys.notify('Omaflow', message)
     end
 
     def restore_snapshot(snapshot)
@@ -275,6 +315,13 @@ module Omaflow
       return ["no sink matches: #{action['match']}", false] unless sink
 
       [sink['name'], Sys.run('pactl', 'set-default-sink', sink['name'])]
+    end
+
+    def apply_script(action)
+      script = ScriptRegistry.available(action['name'])
+      return ["script unavailable: #{action['name']}", false] unless script
+
+      [action['name'], Sys.run(script['path'], timeout: 30)]
     end
 
     def apply_webhook(action)

@@ -2,9 +2,12 @@
 
 module Omaflow
   module Vocabulary
-    TRIGGERS = %w[manual time interval monitor-connected monitor-disconnected wifi-connected wifi-disconnected power-source].freeze
-    CONDITIONS = %w[time-between weekday on-power monitor-present on-ssid].freeze
-    ACTIONS = %w[theme dnd nightlight stay-awake launch workspace audio-output webhook notify].freeze
+    TRIGGERS = %w[
+      manual time interval lid-opened lid-closed monitor-connected monitor-disconnected
+      wifi-connected wifi-disconnected power-source
+    ].freeze
+    CONDITIONS = %w[time-between weekday on-power lid-state monitor-present on-ssid].freeze
+    ACTIONS = %w[theme dnd nightlight stay-awake launch workspace audio-output script webhook notify].freeze
     WEEKDAYS = %w[mon tue wed thu fri sat sun].freeze
     WEBHOOK_FORMATS = %w[json slack discord ntfy raw].freeze
     RULE_FIELDS = %w[schemaVersion id name enabled trigger conditions actions cooldownSeconds source createdBy createdAt].freeze

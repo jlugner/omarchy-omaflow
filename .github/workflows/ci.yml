@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Syntax-check sources
-        run: for f in bin/* lib/omaflow.rb lib/omaflow/*.rb; do ruby -c "$f" >/dev/null; done && bash -n tests/*.sh
+        run: for f in bin/* lib/omaflow.rb lib/omaflow/*.rb; do ruby -c "$f" >/dev/null; done && bash -n install.sh scripts/* tests/*.sh
 
       - name: Lint
         run: rubocop --no-color lib bin
@@ -42,3 +42,12 @@ jobs:
 
       - name: Authoring pipeline test
         run: tests/test-author.sh
+
+      - name: Resource hardening test
+        run: tests/test-hardening.sh
+
+      - name: CLI install test
+        run: tests/test-install.sh
+
+      - name: Script allowlist test
+        run: tests/test-scripts.sh

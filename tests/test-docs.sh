@@ -14,6 +14,8 @@ trap 'rm -rf "$test_root"' EXIT
 expected="trigger manual
 trigger time
 trigger interval
+trigger lid-opened
+trigger lid-closed
 trigger monitor-connected
 trigger monitor-disconnected
 trigger wifi-connected
@@ -22,6 +24,7 @@ trigger power-source
 condition time-between
 condition weekday
 condition on-power
+condition lid-state
 condition monitor-present
 condition on-ssid
 action theme
@@ -31,6 +34,7 @@ action stay-awake
 action launch
 action workspace
 action audio-output
+action script
 action webhook
 action notify"
 
@@ -54,5 +58,8 @@ fi
     abort "#{type} missing from the authoring schema doc" unless doc.include?("\"type\":\"#{type}\"")
   end
 '
+
+grep -q 'gdbus.*org.freedesktop.UPower' "$plugin_dir/Service.qml"
+! grep -q 'name === "switch"' "$plugin_dir/Service.qml"
 
 echo "test-docs: ok"

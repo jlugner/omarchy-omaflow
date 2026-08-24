@@ -10,6 +10,8 @@ module Omaflow
       'manual' => :check_manual_trigger,
       'time' => :check_time_trigger,
       'interval' => :check_interval_trigger,
+      'lid-opened' => :check_lid_trigger,
+      'lid-closed' => :check_lid_trigger,
       'monitor-connected' => :check_monitor_trigger,
       'monitor-disconnected' => :check_monitor_trigger,
       'wifi-connected' => :check_wifi_connected_trigger,
@@ -21,6 +23,7 @@ module Omaflow
       'time-between' => :check_time_between,
       'weekday' => :check_weekday,
       'on-power' => :check_on_power,
+      'lid-state' => :check_lid_state,
       'monitor-present' => :check_monitor_present,
       'on-ssid' => :check_on_ssid
     }.freeze
@@ -33,6 +36,7 @@ module Omaflow
       'launch' => :check_launch,
       'workspace' => :check_workspace,
       'audio-output' => :check_audio_output,
+      'script' => :check_script,
       'webhook' => :check_webhook,
       'notify' => :check_notify
     }.freeze
@@ -123,6 +127,11 @@ module Omaflow
       unknown_keys(trigger, %w[type minutes], '.trigger')
     end
 
+    def check_lid_trigger(trigger)
+      unknown_keys(trigger, %w[type], '.trigger')
+      warn_lid_unavailable
+    end
+
     def check_monitor_trigger(trigger)
       match = trigger['match']
       target = match.is_a?(Hash) ? match['description'] || match['name'] : nil
@@ -175,6 +184,24 @@ module Omaflow
     def check_on_power(condition)
       err('on-power needs source: ac|battery') unless %w[ac battery].include?(condition['source'])
       unknown_keys(condition, %w[type source], 'on-power condition')
+    end
+
+    def check_lid_state(condition)
+      err('lid-state needs state: open|closed') unless %w[open closed].include?(condition['state'])
+      unknown_keys(condition, %w[type state], 'lid-state condition')
+      warn_lid_unavailable
+    end
+
+    def warn_lid_unavailable
+      message = 'no laptop lid state is currently available; this rule will stay idle'
+      warn(message) unless lid_available? || warnings.include?(message)
+    end
+
+    def lid_available?
+      lid_dir = ENV.fetch('OMAFLOW_LID_DIR', '/proc/acpi/button/lid')
+      Dir.glob(File.join(lid_dir, '*', 'state')).any? { File.file?(it) && File.readable?(it) }
+    rescue StandardError
+      false
     end
 
     def check_monitor_present(condition)
@@ -258,6 +285,21 @@ module Omaflow
       end
       present = sinks.any? { "#{it['description']} #{it['name']}".downcase.include?(action['match'].downcase) }
       warn("no currently connected sink matches: #{action['match']} (may appear later)") unless present
+    end
+
+    def check_script(action)
+      name = action['name']
+      err('script action needs a lowercase allowlisted name') unless ScriptRegistry.valid_name?(name)
+      unknown_keys(action, %w[type name], 'script action')
+      return unless ScriptRegistry.valid_name?(name)
+
+      if ScriptRegistry.entry(name).nil?
+        err("no script named '#{name}' — add it with: omaflow scripts add #{name} /absolute/path")
+      elsif ScriptRegistry.resolve(name).nil?
+        err("script '#{name}' is unavailable or not safely executable")
+      elsif ScriptRegistry.available(name).nil?
+        err("script '#{name}' requires a compatible service that is not available")
+      end
     end
 
     def check_webhook(action)

@@ -23,13 +23,14 @@ Item {
 
   property bool evalQueued: false
 
-  function poke(reason) {
+  function poke(reason, immediate) {
     // Coalesce bursts: at most one queued eval at a time; the evaluator
     // itself serializes under a lock.
-    if (root.evalQueued)
+    if (root.evalQueued && !immediate)
       return
     root.evalQueued = true
     evalDelay.reason = reason
+    evalDelay.interval = immediate ? 0 : 400
     evalDelay.restart()
   }
 
@@ -60,6 +61,23 @@ Item {
 
   readonly property bool onBattery: UPower.onBattery
   onOnBatteryChanged: root.poke("power")
+
+  Process {
+    id: upowerMonitor
+    running: true
+    command: ["gdbus", "monitor", "--system", "--dest", "org.freedesktop.UPower", "--object-path", "/org/freedesktop/UPower"]
+    stdout: SplitParser {
+      onRead: root.poke("lid", true)
+    }
+    onExited: upowerRespawn.restart()
+  }
+
+  Timer {
+    id: upowerRespawn
+    interval: 5000
+    repeat: false
+    onTriggered: upowerMonitor.running = true
+  }
 
   Process {
     id: networkMonitor

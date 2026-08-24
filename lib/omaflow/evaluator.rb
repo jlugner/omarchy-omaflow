@@ -46,6 +46,8 @@ module Omaflow
       probes['ssid'] = ssid if ssid
       on_ac = probe_on_ac
       probes['onAc'] = on_ac unless on_ac.nil?
+      lid_closed = probe_lid_closed
+      probes['lidClosed'] = lid_closed unless lid_closed.nil?
       probes
     end
 
@@ -83,6 +85,18 @@ module Omaflow
       nil
     end
 
+    def probe_lid_closed
+      lid_dir = ENV.fetch('OMAFLOW_LID_DIR', '/proc/acpi/button/lid')
+      Dir.glob(File.join(lid_dir, '*', 'state')).each do |path|
+        state = File.read(path, 64).to_s.downcase
+        return true if state.include?('closed')
+        return false if state.include?('open')
+      rescue StandardError
+        next
+      end
+      nil
+    end
+
     def baseline
       seed_seen_ssid
       Store.reindex
@@ -99,7 +113,7 @@ module Omaflow
     def domain_fresh?(key) = @previous.key?(key) && @probes.key?(key)
 
     def derive_events
-      [*monitor_events, *wifi_events, *power_events, *time_events]
+      [*monitor_events, *wifi_events, *power_events, *lid_events, *time_events]
     end
 
     def monitor_events
@@ -135,6 +149,14 @@ module Omaflow
       return [] if @previous['onAc'] == @current['onAc']
 
       [{ 'type' => 'power-source', 'data' => { 'source' => @current['onAc'] ? 'ac' : 'battery' } }]
+    end
+
+    def lid_events
+      return [] unless domain_fresh?('lidClosed')
+      return [] if @previous['lidClosed'] == @current['lidClosed']
+
+      type = @current['lidClosed'] ? 'lid-closed' : 'lid-opened'
+      [{ 'type' => type, 'data' => { 'state' => @current['lidClosed'] ? 'closed' : 'open' } }]
     end
 
     def time_events
@@ -200,6 +222,7 @@ module Omaflow
       when 'time-between' then time_between?(condition['from'], condition['to'])
       when 'weekday' then condition.fetch('days', []).include?(@weekday)
       when 'on-power' then (condition['source'] == 'ac') == @current.fetch('onAc', true)
+      when 'lid-state' then lid_state?(condition['state'])
       when 'monitor-present' then monitor_present?(condition)
       when 'on-ssid' then @current['ssid'].to_s.downcase.include?(condition['ssid'].to_s.downcase)
       else false
@@ -217,6 +240,12 @@ module Omaflow
     def monitor_present?(condition)
       target = (condition.dig('match', 'description') || condition.dig('match', 'name')).to_s.downcase
       @current.fetch('monitors', []).any? { "#{it['description']} #{it['name']}".downcase.include?(target) }
+    end
+
+    def lid_state?(state)
+      return false unless @current.key?('lidClosed')
+
+      @current['lidClosed'] == (state == 'closed')
     end
 
     def cooldown_over?(rule)

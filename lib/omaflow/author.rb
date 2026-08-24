@@ -8,6 +8,8 @@ module Omaflow
         {"type":"manual"}
         {"type":"time","at":"HH:MM","days":["mon".."sun"] (optional)}
         {"type":"interval","minutes":N} — fires roughly every N minutes (1..1440, integer). Combine with conditions to scope where it applies; omit cooldownSeconds, the interval is the spacing.
+        {"type":"lid-opened"}
+        {"type":"lid-closed"}
         {"type":"monitor-connected","match":{"description":"<substring>"}} (or match.name)
         {"type":"monitor-disconnected","match":{"description":"<substring>"}}
         {"type":"wifi-connected","match":{"ssid":"<substring or *>"}} or {"type":"wifi-connected","match":{"known":false}} for never-seen networks
@@ -17,6 +19,7 @@ module Omaflow
         {"type":"time-between","from":"HH:MM","to":"HH:MM"}
         {"type":"weekday","days":[...]}
         {"type":"on-power","source":"ac"|"battery"}
+        {"type":"lid-state","state":"open"|"closed"}
         {"type":"monitor-present","match":{"description":"<substring>"}}
         {"type":"on-ssid","ssid":"<substring>"}
       Actions (executed in order):
@@ -27,6 +30,7 @@ module Omaflow
         {"type":"launch","app":"<app name>","workspace":N (optional)}
         {"type":"workspace","number":N}
         {"type":"audio-output","match":"<sink description substring>"}
+        {"type":"script","name":"<allowed script name>"} — runs one exact packaged or user-approved executable. name must be from the allowed scripts inventory; no path, arguments, or shell text are permitted in a rule.
         {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
       In notify and webhook messages the literal placeholder {{trigger}} is replaced with a description of the firing event.
@@ -114,6 +118,7 @@ module Omaflow
         Audio sinks: #{JSON.generate(inventory_sinks)}
         Installed apps: #{JSON.generate(Desktop.installed_app_names)}
         Current wifi SSID: #{JSON.generate(current_ssid)}
+        Allowed scripts (the only valid script action names): #{JSON.generate(ScriptRegistry.inventory)}
         Configured webhook endpoints (the only valid webhook endpoint values): #{JSON.generate(webhook_names)}
 
         Pick the closest trigger and actions that the vocabulary supports; if part of the request is unsupported, cover what you can with supported actions (a notify action may explain the rest). Set source to the user request verbatim.

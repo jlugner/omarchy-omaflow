@@ -16,6 +16,7 @@ module Omaflow
     def rules_dir = File.join(config_dir, 'rules')
     def config_file = File.join(config_dir, 'config.json')
     def webhooks_file = File.join(config_dir, 'webhooks.json')
+    def scripts_file = File.join(config_dir, 'scripts.json')
     def index_file = File.join(state_dir, 'index.json')
     def log_file = File.join(state_dir, 'log.jsonl')
     def domains_file = File.join(state_dir, 'domains.json')
@@ -28,7 +29,7 @@ module Omaflow
     def ensure_dirs
       FileUtils.mkdir_p([rules_dir, state_dir, snapshots_dir])
       [config_dir, rules_dir, state_dir, snapshots_dir].each { File.chmod(0o700, it) }
-      [webhooks_file, staging_file, log_file].each { File.chmod(0o600, it) if File.exist?(it) }
+      [webhooks_file, scripts_file, staging_file, log_file].each { File.chmod(0o600, it) if File.exist?(it) }
     rescue SystemCallError
       nil
     end

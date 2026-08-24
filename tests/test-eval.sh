@@ -12,7 +12,7 @@ trap 'rm -rf "$test_root"' EXIT
 
 fake_bin="$test_root/bin"
 calls="$test_root/calls.log"
-mkdir -p "$fake_bin" "$test_root/config" "$test_root/state" "$test_root/power/AC"
+mkdir -p "$fake_bin" "$test_root/config" "$test_root/state" "$test_root/power/AC" "$test_root/lid/LID0"
 
 # Fake system surface. Every fake appends its argv to calls.log.
 make_fake() {
@@ -23,7 +23,7 @@ make_fake() {
 make_fake hyprctl 'if [[ -n ${TEST_HYPRCTL_FAIL:-} ]]; then exit 1; fi; if [[ $1 == monitors ]]; then cat "$TEST_MONITORS"; fi'
 make_fake nmcli 'if [[ $1 == -t ]]; then cat "$TEST_WIFI"; fi'
 make_fake omarchy 'if [[ $1 == theme && $2 == current ]]; then echo old-theme; elif [[ $1 == theme && $2 == list ]]; then printf "old-theme\nwork-theme\nbroken-theme\n"; fi'
-make_fake omarchy-shell 'case "$2" in dndState) echo off ;; status) echo "{\"stayAwake\":false}" ;; *) echo ok ;; esac'
+make_fake omarchy-shell 'case "$2" in dndState) echo off ;; status) echo "{\"stayAwake\":false}" ;; fingerprintControlAvailable) echo true ;; *) echo ok ;; esac'
 make_fake pactl 'if [[ $1 == get-default-sink ]]; then echo old-sink; elif [[ $* == *"list sinks"* ]]; then echo "[{\"name\":\"dock-sink\",\"description\":\"Dock Audio\"}]"; fi'
 make_fake omarchy-notification-send 'true'
 make_fake gtk-launch 'true'
@@ -34,12 +34,14 @@ echo '[{"name":"eDP-1","description":"Laptop Screen"}]' >"$TEST_MONITORS"
 echo 'yes:HomeWifi' >"$TEST_WIFI"
 echo Mains >"$test_root/power/AC/type"
 echo 1 >"$test_root/power/AC/online"
+echo 'state: open' >"$test_root/lid/LID0/state"
 
 run_env() {
   HOME="$test_root" \
   XDG_CONFIG_HOME="$test_root/config" \
   XDG_STATE_HOME="$test_root/state" \
   OMAFLOW_POWER_DIR="$test_root/power" \
+  OMAFLOW_LID_DIR="$test_root/lid" \
   PATH="$fake_bin:/usr/bin:/bin" \
     "$@"
 }
@@ -210,8 +212,8 @@ if run_env "$plugin_dir/bin/omaflow-run" evil-hook 2>/dev/null; then
 fi
 ! grep -q curl "$calls"
 
-# 9. Reverting a run whose actions were all non-revertible (empty snapshot)
-#    succeeds as a no-op instead of being mistaken for corrupt state.
+# 9. Reverting a run whose actions were all non-revertible fails honestly
+#    instead of claiming that a no-op restored anything.
 cat >"$rules_dir/notify-only.json" <<'EOF'
 {
   "schemaVersion": 1, "id": "notify-only", "name": "Notify only", "enabled": true,
@@ -221,8 +223,12 @@ cat >"$rules_dir/notify-only.json" <<'EOF'
 EOF
 run_env "$plugin_dir/bin/omaflow-run" notify-only --trigger test
 exec_id=$(grep '"ruleId":"notify-only"' "$state/log.jsonl" | tail -1 | jq -r '.execId')
-run_env "$plugin_dir/bin/omaflow-run" --revert "$exec_id"
-run_env jq -e '.kind == "revert" and .status == "ok"' <(grep "\"execId\":\"$exec_id\"" "$state/log.jsonl" | tail -1) >/dev/null
+if run_env "$plugin_dir/bin/omaflow-run" --revert "$exec_id" 2>/dev/null; then
+  echo "non-revertible execution unexpectedly reported a successful revert" >&2
+  exit 1
+fi
+run_env jq -e '.kind == "revert" and .status == "not-revertible"' \
+  <(grep "\"execId\":\"$exec_id\"" "$state/log.jsonl" | tail -1) >/dev/null
 
 # 10. Corrupt domain state quarantines and re-baselines instead of stalling.
 echo 'not json' >"$state/domains.json"
@@ -319,7 +325,76 @@ run_env "$plugin_dir/bin/omaflow-eval" test
 grep -q 'omarchy-notification-send.*eyes' "$calls"
 run_env "$plugin_dir/bin/omaflow" delete eye-timer >/dev/null
 
-# 16. Empty XDG variables mean unset, not the filesystem root.
+# 16. Lid transitions run only the corresponding allowlisted fingerprint
+#     script, and a missing lid probe preserves the last state without firing.
+cat >"$rules_dir/lid-close-fingerprint.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "lid-close-fingerprint", "name": "Disable fingerprint when closed", "enabled": true,
+  "trigger": {"type": "lid-closed"},
+  "actions": [{"type": "script", "name": "lock-fingerprint-disable"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/lid-open-fingerprint.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "lid-open-fingerprint", "name": "Enable fingerprint when open", "enabled": true,
+  "trigger": {"type": "lid-opened"},
+  "actions": [{"type": "script", "name": "lock-fingerprint-enable"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/lid-condition-match.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "lid-condition-match", "name": "Closed lid condition", "enabled": true,
+  "trigger": {"type": "lid-closed"}, "conditions": [{"type": "lid-state", "state": "closed"}],
+  "actions": [{"type": "notify", "message": "lid-condition-matched"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/lid-condition-miss.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "lid-condition-miss", "name": "Open lid condition", "enabled": true,
+  "trigger": {"type": "lid-closed"}, "conditions": [{"type": "lid-state", "state": "open"}],
+  "actions": [{"type": "notify", "message": "lid-condition-missed"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+echo 'state: closed' >"$test_root/lid/LID0/state"
+run_env "$plugin_dir/bin/omaflow-eval" lid
+grep -q 'omarchy-shell lock setFingerprintEnabled off' "$calls"
+! grep -q 'setFingerprintEnabled on' "$calls"
+grep -q 'omarchy-notification-send.*lid-condition-matched' "$calls"
+! grep -q 'lid-condition-missed' "$calls"
+run_env jq -e '.lidClosed == true' "$state/domains.json" >/dev/null
+cat >"$rules_dir/mixed-revert.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "mixed-revert", "name": "Mixed revert", "enabled": true,
+  "trigger": {"type": "manual"},
+  "actions": [{"type": "theme", "name": "work-theme"}, {"type": "script", "name": "lock-fingerprint-disable"}],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+run_env "$plugin_dir/bin/omaflow-run" mixed-revert
+mixed_exec_id=$(grep '"ruleId":"mixed-revert"' "$state/log.jsonl" | tail -1 | jq -r '.execId')
+: >"$calls"
+if run_env "$plugin_dir/bin/omaflow-run" --revert "$mixed_exec_id" 2>/dev/null; then
+  echo "mixed irreversible execution unexpectedly reported a full revert" >&2
+  exit 1
+fi
+grep -q 'omarchy theme set old-theme' "$calls"
+! grep -q 'setFingerprintEnabled on' "$calls"
+run_env jq -e '.kind == "revert" and .status == "partial" and (.detail | test("script"))' \
+  <(grep "\"execId\":\"$mixed_exec_id\"" "$state/log.jsonl" | tail -1) >/dev/null
+mv "$test_root/lid/LID0/state" "$test_root/lid/LID0/state.hidden"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" lid
+! grep -q 'setFingerprintEnabled' "$calls"
+run_env jq -e '.lidClosed == true' "$state/domains.json" >/dev/null
+mv "$test_root/lid/LID0/state.hidden" "$test_root/lid/LID0/state"
+echo 'state: open' >"$test_root/lid/LID0/state"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" lid
+grep -q 'omarchy-shell lock setFingerprintEnabled on' "$calls"
+! grep -q 'setFingerprintEnabled off' "$calls"
+
+# 17. Empty XDG variables mean unset, not the filesystem root.
 XDG_STATE_HOME="" XDG_CONFIG_HOME="" HOME="$test_root" /usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
   abort "empty XDG_STATE_HOME resolved to #{Omaflow::Paths.state_dir}" unless
     Omaflow::Paths.state_dir == File.join(Dir.home, ".local", "state", "omaflow")

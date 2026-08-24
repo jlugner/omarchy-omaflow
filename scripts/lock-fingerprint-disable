@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euo pipefail
+
+exec omarchy-shell lock setFingerprintEnabled off
