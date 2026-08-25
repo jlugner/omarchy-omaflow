@@ -656,8 +656,8 @@ Item {
     property color tint: root.accentColor
     property bool filled: true
 
-    implicitWidth: badgeText.implicitWidth + Style.space(16)
-    implicitHeight: Style.space(20)
+    implicitWidth: badgeText.implicitWidth + Style.space(20)
+    implicitHeight: Style.space(22)
     radius: height / 2
     color: filled ? Qt.alpha(tint, 0.16) : "transparent"
     border.width: filled ? 0 : 1
@@ -666,6 +666,7 @@ Item {
     Text {
       id: badgeText
       anchors.centerIn: parent
+      anchors.horizontalCenterOffset: 1
       text: nodeBadge.label
       textFormat: Text.PlainText
       color: nodeBadge.tint
@@ -691,7 +692,7 @@ Item {
 
     Rectangle {
       anchors.left: parent.left
-      anchors.leftMargin: Style.space(8)
+      anchors.leftMargin: Style.space(10)
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       anchors.topMargin: Style.spacing.md
@@ -707,8 +708,8 @@ Item {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.topMargin: Style.spacing.md
-      anchors.leftMargin: Style.space(22)
-      anchors.rightMargin: Style.spacing.md
+      anchors.leftMargin: Style.space(26)
+      anchors.rightMargin: Style.space(18)
       spacing: Style.spacing.sm
     }
   }
@@ -755,6 +756,7 @@ Item {
       Text {
         id: connectorLabel
         anchors.centerIn: parent
+        anchors.horizontalCenterOffset: 1
         text: connectorItem.label
         textFormat: Text.PlainText
         color: Qt.alpha(root.accentColor, 0.9)
@@ -1114,7 +1116,7 @@ Item {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          spacing: Style.space(4)
+          spacing: Style.spacing.sm
 
           Row {
             width: parent.width
@@ -1181,6 +1183,7 @@ Item {
 
           Text {
             width: parent.width
+            topPadding: Style.space(2)
             text: "Enter on a step searches types  ·  Tab between fields  ·  Save stages for review, nothing runs yet"
             textFormat: Text.PlainText
             color: root.editorInkMuted
@@ -1196,8 +1199,8 @@ Item {
           anchors.bottom: editorFooter.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.topMargin: Style.spacing.md
-          anchors.bottomMargin: Style.spacing.md
+          anchors.topMargin: Style.space(20)
+          anchors.bottomMargin: Style.space(20)
           contentHeight: editorChain.implicitHeight
           clip: true
           boundsBehavior: Flickable.StopAtBounds
@@ -1629,7 +1632,7 @@ Item {
                       Row {
                         id: actionControls
                         anchors.top: parent.top
-                        spacing: Style.space(2)
+                        spacing: Style.space(6)
 
                         EditorButton {
                           label: "↑"
@@ -1882,7 +1885,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             y: Style.space(56)
             width: Math.min(Style.space(380), parent.width - Style.space(48))
-            height: pickerSearchBox.height + pickerList.height + Style.spacing.md * 2 + Style.spacing.sm
+            height: pickerSearchBox.height + pickerList.height + Style.spacing.md * 2 + Style.spacing.sm * 2
             radius: root.cornerRadius
             color: root.background
             border.width: 1
