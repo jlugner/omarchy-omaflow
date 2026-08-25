@@ -57,6 +57,48 @@ Item {
   readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-ssid": "only on a given wifi" })
   readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
   function prettyType(value) { return String(value).split("-").join(" ") }
+  property var pickerTarget: null
+  property string pickerQuery: ""
+  property int pickerIndex: 0
+  readonly property var pickerFiltered: {
+    if (pickerTarget === null) return []
+    var types = pickerTarget.kind === "trigger" ? triggerTypes : pickerTarget.kind === "condition" ? conditionTypes : actionTypes
+    var captions = pickerTarget.kind === "trigger" ? triggerCaptions : pickerTarget.kind === "condition" ? conditionCaptions : actionCaptions
+    var query = pickerQuery.toLowerCase()
+    var options = []
+    for (var i = 0; i < types.length; i++) {
+      var caption = captions[types[i]] || ""
+      if (query === "" || types[i].indexOf(query) >= 0 || prettyType(types[i]).indexOf(query) >= 0 || caption.toLowerCase().indexOf(query) >= 0)
+        options.push({ type: types[i], caption: caption })
+    }
+    return options
+  }
+
+  property var pickerReturn: null
+
+  function openTypePicker(kind, index, origin) {
+    root.pickerQuery = ""
+    root.pickerIndex = 0
+    root.pickerReturn = origin || null
+    root.pickerTarget = { kind: kind, index: index }
+    Qt.callLater(function() { pickerInput.text = ""; pickerInput.forceActiveFocus() })
+  }
+
+  function closePicker() {
+    root.pickerTarget = null
+    if (root.pickerReturn) root.pickerReturn.forceActiveFocus()
+    else editor.forceActiveFocus()
+    root.pickerReturn = null
+  }
+
+  function applyPicker() {
+    if (root.pickerTarget === null || root.pickerFiltered.length === 0) return
+    var choice = root.pickerFiltered[Math.max(0, Math.min(root.pickerIndex, root.pickerFiltered.length - 1))].type
+    if (root.pickerTarget.kind === "trigger") root.editorTrigger = root.defaultTrigger(choice)
+    else if (root.pickerTarget.kind === "condition") editorConditions.set(root.pickerTarget.index, root.defaultCondition(choice))
+    else editorActions.set(root.pickerTarget.index, root.defaultAction(choice))
+    root.closePicker()
+  }
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
   readonly property int cornerRadius: Style.cornerRadius
   readonly property int contentMargin: Style.spacing.panelPadding
@@ -486,6 +528,7 @@ Item {
     property string label: ""
     property bool strong: false
     property bool ghost: false
+    property bool accented: false
     property bool tabFocus: true
     signal clicked()
 
@@ -494,10 +537,12 @@ Item {
     implicitHeight: Math.max(Style.space(30), buttonLabel.implicitHeight + Style.spacing.sm)
     radius: height / 2
     color: strong ? root.accentColor
+      : ghost && accented ? (activeFocus || buttonMouse.containsMouse ? Qt.alpha(root.accentColor, 0.12) : "transparent")
       : ghost ? (activeFocus || buttonMouse.containsMouse ? Qt.alpha(root.foreground, 0.08) : "transparent")
       : Style.controlFill(activeFocus, buttonMouse.containsMouse, root.foreground, root.accentColor)
     border.width: strong ? 0 : 1
     border.color: activeFocus ? Qt.alpha(root.accentColor, 0.9)
+      : ghost && accented ? Qt.alpha(root.accentColor, 0.35)
       : ghost ? (buttonMouse.containsMouse ? root.editorHairline : "transparent")
       : root.editorHairline
 
@@ -507,6 +552,7 @@ Item {
       text: editorButton.label
       textFormat: Text.PlainText
       color: editorButton.strong ? (root.accentColor.hslLightness > 0.55 ? Qt.rgba(0, 0, 0, 0.85) : "#ffffff")
+        : editorButton.accented ? Qt.alpha(root.accentColor, editorButton.activeFocus || buttonMouse.containsMouse ? 1 : 0.85)
         : editorButton.ghost && !(editorButton.activeFocus || buttonMouse.containsMouse) ? root.editorInkMuted
         : root.foreground
       font.family: Style.font.menuFamily
@@ -670,17 +716,18 @@ Item {
   component Connector: Item {
     id: connectorItem
     property bool arrow: false
+    property string label: ""
 
     width: parent.width
-    implicitHeight: Style.space(arrow ? 20 : 14)
+    implicitHeight: Style.space(label !== "" ? 32 : arrow ? 26 : 20)
 
     Rectangle {
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.top: parent.top
       anchors.bottom: parent.bottom
-      anchors.bottomMargin: connectorItem.arrow ? Style.space(6) : 0
+      anchors.bottomMargin: connectorItem.arrow ? Style.space(7) : 0
       width: 1
-      color: root.editorLine
+      color: Qt.alpha(root.accentColor, 0.4)
     }
 
     Text {
@@ -690,9 +737,32 @@ Item {
       anchors.bottomMargin: -Style.space(2)
       text: "▾"
       textFormat: Text.PlainText
-      color: root.editorLine
+      color: Qt.alpha(root.accentColor, 0.65)
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.caption * 0.9)
+    }
+
+    Rectangle {
+      visible: connectorItem.label !== ""
+      anchors.centerIn: parent
+      width: connectorLabel.implicitWidth + Style.space(16)
+      height: Style.space(18)
+      radius: height / 2
+      color: root.background
+      border.width: 1
+      border.color: Qt.alpha(root.accentColor, 0.45)
+
+      Text {
+        id: connectorLabel
+        anchors.centerIn: parent
+        text: connectorItem.label
+        textFormat: Text.PlainText
+        color: Qt.alpha(root.accentColor, 0.9)
+        font.family: Style.font.menuFamily
+        font.pixelSize: Math.round(Style.font.caption * 0.8)
+        font.weight: Font.Bold
+        font.letterSpacing: 1.2
+      }
     }
   }
 
@@ -701,6 +771,7 @@ Item {
     property string value: ""
     property string caption: ""
     signal cycle(int delta)
+    signal openPicker()
 
     activeFocusOnTab: true
     implicitHeight: selectorColumn.implicitHeight
@@ -708,7 +779,7 @@ Item {
     Column {
       id: selectorColumn
       anchors.left: parent.left
-      anchors.right: chevrons.left
+      anchors.right: dropAffordance.left
       anchors.rightMargin: Style.spacing.sm
       spacing: Style.space(2)
 
@@ -739,47 +810,39 @@ Item {
       anchors.fill: selectorColumn
       onClicked: {
         typeSelector.forceActiveFocus()
-        typeSelector.cycle(1)
+        typeSelector.openPicker()
       }
     }
 
-    Row {
-      id: chevrons
+    Rectangle {
+      id: dropAffordance
       anchors.right: parent.right
       anchors.top: parent.top
-      spacing: Style.space(2)
-      opacity: typeSelector.activeFocus || selectorHover.hovered ? 1 : 0.4
+      width: dropLabel.implicitWidth + Style.space(16)
+      height: Style.space(22)
+      radius: height / 2
+      color: dropMouse.containsMouse ? Qt.alpha(root.accentColor, 0.12) : "transparent"
+      border.width: 1
+      border.color: typeSelector.activeFocus || dropMouse.containsMouse ? Qt.alpha(root.accentColor, 0.45) : root.editorHairline
+      opacity: typeSelector.activeFocus || selectorHover.hovered ? 1 : 0.55
 
-      Repeater {
-        model: ["‹", "›"]
+      Text {
+        id: dropLabel
+        anchors.centerIn: parent
+        text: "change ▾"
+        textFormat: Text.PlainText
+        color: typeSelector.activeFocus || dropMouse.containsMouse ? Qt.alpha(root.accentColor, 0.9) : root.editorInkMuted
+        font.family: Style.font.menuFamily
+        font.pixelSize: Math.round(Style.font.caption * 0.9)
+      }
 
-        Rectangle {
-          id: chevron
-          required property string modelData
-          required property int index
-          width: Style.space(22)
-          height: Style.space(22)
-          radius: width / 2
-          color: chevronMouse.containsMouse ? Qt.alpha(root.foreground, 0.08) : "transparent"
-
-          Text {
-            anchors.centerIn: parent
-            text: chevron.modelData
-            textFormat: Text.PlainText
-            color: root.foreground
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.body
-          }
-
-          MouseArea {
-            id: chevronMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            onClicked: {
-              typeSelector.forceActiveFocus()
-              typeSelector.cycle(chevron.index === 0 ? -1 : 1)
-            }
-          }
+      MouseArea {
+        id: dropMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        onClicked: {
+          typeSelector.forceActiveFocus()
+          typeSelector.openPicker()
         }
       }
     }
@@ -789,6 +852,9 @@ Item {
     Keys.onPressed: function(event) {
       if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
         typeSelector.cycle(event.key === Qt.Key_Left ? -1 : 1)
+        event.accepted = true
+      } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space || event.key === Qt.Key_Down) {
+        typeSelector.openPicker()
         event.accepted = true
       }
     }
@@ -1037,7 +1103,8 @@ Item {
 
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
-            root.cancelEditor()
+            if (root.pickerTarget !== null) root.closePicker()
+            else root.cancelEditor()
             event.accepted = true
           }
         }
@@ -1114,7 +1181,7 @@ Item {
 
           Text {
             width: parent.width
-            text: "‹ › change a step  ·  Tab between fields  ·  Save stages for review, nothing runs yet"
+            text: "Enter on a step searches types  ·  Tab between fields  ·  Save stages for review, nothing runs yet"
             textFormat: Text.PlainText
             color: root.editorInkMuted
             font.family: Style.font.menuFamily
@@ -1170,6 +1237,7 @@ Item {
                     onCycle: function(delta) {
                       root.editorTrigger = root.defaultTrigger(root.cycleValue(root.triggerTypes, value, delta))
                     }
+                    onOpenPicker: root.openTypePicker("trigger", 0, triggerSelector)
                   }
                 }
 
@@ -1371,12 +1439,14 @@ Item {
                       }
 
                       TypeSelector {
+                        id: conditionTypeSelector
                         width: parent.width - ifBadge.width - removeCondition.width - parent.spacing * 2
                         value: String(conditionDelegate.model.type)
                         caption: root.conditionCaptions[String(conditionDelegate.model.type)] || ""
                         onCycle: function(delta) {
                           editorConditions.set(conditionDelegate.index, root.defaultCondition(root.cycleValue(root.conditionTypes, value, delta)))
                         }
+                        onOpenPicker: root.openTypePicker("condition", conditionDelegate.index, conditionTypeSelector)
                       }
 
                       EditorButton {
@@ -1486,7 +1556,9 @@ Item {
                   }
                 }
 
-                Connector {}
+                Connector {
+                  label: conditionDelegate.index < editorConditions.count - 1 ? "AND" : ""
+                }
               }
             }
 
@@ -1499,13 +1571,17 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 label: editorConditions.count >= 5 ? "5 conditions maximum" : "＋ only if…"
                 ghost: true
+                accented: true
                 enabled: editorConditions.count < 5
                 opacity: enabled ? 1 : 0.4
                 onClicked: if (enabled) editorConditions.append(root.defaultCondition("time-between"))
               }
             }
 
-            Connector { arrow: true }
+            Connector {
+              arrow: true
+              label: editorConditions.count > 0 ? "ALL PASS" : "THEN"
+            }
 
             Repeater {
               model: editorActions
@@ -1540,12 +1616,14 @@ Item {
                       }
 
                       TypeSelector {
+                        id: actionTypeSelector
                         width: parent.width - doBadge.width - actionControls.width - parent.spacing * 2
                         value: String(actionDelegate.model.type)
                         caption: root.actionCaptions[String(actionDelegate.model.type)] || ""
                         onCycle: function(delta) {
                           editorActions.set(actionDelegate.index, root.defaultAction(root.cycleValue(root.actionTypes, value, delta)))
                         }
+                        onOpenPicker: root.openTypePicker("action", actionDelegate.index, actionTypeSelector)
                       }
 
                       Row {
@@ -1724,6 +1802,7 @@ Item {
                 anchors.topMargin: Style.spacing.sm
                 label: editorActions.count >= 10 ? "10 actions maximum" : "＋ do…"
                 ghost: true
+                accented: true
                 enabled: editorActions.count < 10
                 opacity: enabled ? 1 : 0.4
                 onClicked: if (enabled) editorActions.append(root.defaultAction("notify"))
@@ -1785,6 +1864,192 @@ Item {
           color: root.accentColor
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
+        }
+
+        Rectangle {
+          anchors.fill: parent
+          z: 60
+          visible: root.pickerTarget !== null
+          color: root.scrim
+
+          MouseArea {
+            anchors.fill: parent
+            onClicked: root.closePicker()
+          }
+
+          Rectangle {
+            id: pickerCard
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Style.space(56)
+            width: Math.min(Style.space(380), parent.width - Style.space(48))
+            height: pickerSearchBox.height + pickerList.height + Style.spacing.md * 2 + Style.spacing.sm
+            radius: root.cornerRadius
+            color: root.background
+            border.width: 1
+            border.color: Qt.alpha(root.accentColor, 0.6)
+
+            MouseArea { anchors.fill: parent; onClicked: {} }
+
+            Rectangle {
+              id: pickerSearchBox
+              anchors.top: parent.top
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.topMargin: Style.spacing.md
+              anchors.leftMargin: Style.spacing.md
+              anchors.rightMargin: Style.spacing.md
+              height: Style.space(34)
+              radius: Style.space(6)
+              color: Qt.alpha(root.foreground, 0.05)
+              border.width: 1
+              border.color: pickerInput.activeFocus ? Qt.alpha(root.accentColor, 0.9) : root.editorHairline
+
+              Text {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                visible: pickerInput.text.length === 0
+                text: root.pickerTarget !== null && root.pickerTarget.kind === "trigger" ? "search triggers…"
+                  : root.pickerTarget !== null && root.pickerTarget.kind === "condition" ? "search conditions…"
+                  : "search actions…"
+                textFormat: Text.PlainText
+                color: root.foreground
+                opacity: 0.35
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              TextEdit {
+                id: pickerInput
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: Style.spacing.sm
+                anchors.rightMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: TextEdit.PlainText
+                wrapMode: TextEdit.NoWrap
+                color: root.foreground
+                selectionColor: root.selectedBackground
+                selectedTextColor: root.selectedText
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                onTextChanged: {
+                  root.pickerQuery = text
+                  root.pickerIndex = 0
+                }
+
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    root.closePicker()
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Down) {
+                    root.pickerIndex = Math.min(root.pickerIndex + 1, root.pickerFiltered.length - 1)
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Up) {
+                    root.pickerIndex = Math.max(root.pickerIndex - 1, 0)
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    root.applyPicker()
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                    event.accepted = true
+                  }
+                }
+              }
+            }
+
+            ListView {
+              id: pickerList
+              anchors.top: pickerSearchBox.bottom
+              anchors.topMargin: Style.spacing.sm
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.leftMargin: Style.spacing.md
+              anchors.rightMargin: Style.spacing.md
+              height: Math.max(1, Math.min(root.pickerFiltered.length, 7)) * Style.space(44)
+              clip: true
+              model: root.pickerFiltered
+              boundsBehavior: Flickable.StopAtBounds
+
+              onModelChanged: positionViewAtBeginning()
+
+              delegate: Item {
+                id: pickerRow
+                required property var modelData
+                required property int index
+                width: pickerList.width
+                height: Style.space(44)
+
+                Rectangle {
+                  anchors.fill: parent
+                  radius: Style.space(6)
+                  color: pickerRow.index === root.pickerIndex ? Qt.alpha(root.accentColor, 0.12) : "transparent"
+                }
+
+                Rectangle {
+                  visible: pickerRow.index === root.pickerIndex
+                  anchors.left: parent.left
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  anchors.topMargin: Style.space(8)
+                  anchors.bottomMargin: Style.space(8)
+                  anchors.leftMargin: Style.space(4)
+                  width: Style.space(2)
+                  radius: 1
+                  color: root.accentColor
+                }
+
+                Column {
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.leftMargin: Style.space(14)
+                  anchors.rightMargin: Style.spacing.sm
+
+                  Text {
+                    width: parent.width
+                    text: root.prettyType(pickerRow.modelData.type)
+                    textFormat: Text.PlainText
+                    color: pickerRow.index === root.pickerIndex ? root.accentColor : root.foreground
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: pickerRow.modelData.caption
+                    textFormat: Text.PlainText
+                    color: root.editorInkMuted
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Math.round(Style.font.caption * 0.9)
+                    elide: Text.ElideRight
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  onEntered: root.pickerIndex = pickerRow.index
+                  onClicked: {
+                    root.pickerIndex = pickerRow.index
+                    root.applyPicker()
+                  }
+                }
+              }
+
+              Text {
+                visible: root.pickerFiltered.length === 0
+                anchors.centerIn: parent
+                text: "no matching steps"
+                textFormat: Text.PlainText
+                color: root.editorInkMuted
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
         }
       }
 
