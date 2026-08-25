@@ -15,7 +15,7 @@ module Omaflow
         {"type":"app-opened","match":{"class":"<substring>"}} (or match.title)
         {"type":"app-closed","match":{"class":"<substring>"}} (or match.title)
         {"type":"wifi-connected","match":{"ssid":"<substring or *>"}} or {"type":"wifi-connected","match":{"known":false}} for never-seen networks
-        {"type":"wifi-disconnected"}
+        {"type":"wifi-disconnected"} — optional match {"ssid":"<substring>"} reacts only when that network is the one lost
         {"type":"power-source","source":"ac"|"battery"}
         {"type":"file-created","path":"~/Downloads","match":{"name":"<substring>"}} (match optional) — path must start with ~/ or / and name matching is a case-insensitive substring; {{name}} and {{path}} are available
         {"type":"folder-created","path":"~/Downloads","match":{"name":"<substring>"}} (match optional) — path must start with ~/ or / and name matching is a case-insensitive substring; {{name}} and {{path}} are available

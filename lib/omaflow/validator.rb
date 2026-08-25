@@ -191,7 +191,12 @@ module Omaflow
       unknown_keys(match, %w[ssid known], "#{trigger_label}.match") if match.is_a?(Hash)
     end
 
-    def check_wifi_disconnected_trigger(trigger) = unknown_keys(trigger, %w[type], trigger_label)
+    def check_wifi_disconnected_trigger(trigger)
+      match = trigger['match']
+      err('wifi-disconnected match.ssid must be a plain string') if match.is_a?(Hash) && !present_str?(match['ssid'])
+      unknown_keys(trigger, %w[type match], trigger_label)
+      unknown_keys(match, %w[ssid], "#{trigger_label} match") if match.is_a?(Hash)
+    end
 
     def check_power_trigger(trigger)
       err('power-source needs source: ac|battery') unless %w[ac battery].include?(trigger['source'])

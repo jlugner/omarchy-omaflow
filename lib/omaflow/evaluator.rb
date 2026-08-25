@@ -456,6 +456,9 @@ module Omaflow
         file_trigger_matches?(trigger, data)
       when 'git-branch-changed'
         git_trigger_matches?(trigger, data)
+      when 'wifi-disconnected'
+        target = trigger.dig('match', 'ssid')
+        target.nil? || data['ssid'].to_s.downcase.include?(target.downcase)
       when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
       when 'interval' then interval_elapsed
       when 'custom' then data['name'] == trigger['name']
