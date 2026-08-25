@@ -429,7 +429,7 @@ module Omaflow
       return [nil, error] if error
 
       current = JSON.parse(output)
-      [current.is_a?(Hash) && !current.empty?, nil]
+      [current.is_a?(Hash) && current['data'].is_a?(Hash), nil]
     rescue JSON::ParserError
       [nil, 'hey timetrack current returned invalid JSON']
     end

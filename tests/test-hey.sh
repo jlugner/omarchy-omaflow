@@ -21,9 +21,9 @@ printf '\n' >>"$HEY_LOG"
 case "$*" in
   "timetrack current --json")
     if [[ ${HEY_CURRENT:-inactive} == active ]]; then
-      printf '{"id":42,"started_at":"2026-08-25T08:00:00Z"}\n'
+      printf '{"ok":true,"data":{"id":42,"starts_at":"2026-08-25T08:00:00Z"}}\n'
     else
-      printf 'null\n'
+      printf '{"ok":true,"summary":"No active time track"}\n'
     fi
     ;;
   "event list "*" --json")
