@@ -83,6 +83,8 @@ fi
     doc.include?("hey actions talk to the HEY service at trigger time and need hey auth login once")
   abort "until lifecycle guidance missing" unless
     doc.include?("when X ... until Y ...") && doc.include?("one-shot timeout")
+  abort "until revert guidance missing" unless
+    doc.include?(%({"revert":true})) && doc.include?("restore/undo/back to normal") && doc.include?("DND remains on")
   abort "file trigger summary missing path" unless
     Omaflow::Store.trigger_summary({ "type" => "file-created", "path" => "~/Downloads",
                                      "match" => { "name" => ".pdf" } }) == "file-created: ~/Downloads"

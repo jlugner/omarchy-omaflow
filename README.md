@@ -89,6 +89,8 @@ Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a defau
 
 An optional `until` block gives one rule an opening and a closing half. The rule arms only after its opening actions succeed; the matching `until` event later runs the closing actions once and disarms. Conditions and cooldowns gate the opening, never the escape hatch. An interval `until` is a one-shot timeout measured from the latest successful opening fire.
 
+Set `"revert": true` in the `until` block to restore the revertible opening actions to the state captured immediately before the latest successful opening run. This gives true enter-state/leave-state behavior: if Zoom opening turns DND on, Zoom closing puts DND back to off when it was off, but leaves it on when it was already on. An until may contain `revert`, 1–10 closing actions, or both; restoration runs before closing actions, and an expired or missing snapshot is logged and skipped without preventing the actions or disarm.
+
 ```json
 {"schemaVersion":1,"id":"office-tracking","name":"Office tracking","enabled":true,"trigger":{"type":"wifi-connected","match":{"ssid":"Office"}},"actions":[{"type":"hey-timetrack","mode":"start","category":"Work"}],"until":{"trigger":{"type":"wifi-disconnected"},"actions":[{"type":"hey-timetrack","mode":"stop"}]},"source":"start tracking on office wifi until it disconnects"}
 ```

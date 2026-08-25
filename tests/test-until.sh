@@ -10,6 +10,7 @@ trap 'rm -rf "$test_root"' EXIT
 fake_bin="$test_root/bin"
 calls="$test_root/calls.log"
 wifi="$test_root/wifi.txt"
+dnd_state="$test_root/dnd-state"
 mkdir -p "$fake_bin" "$test_root/config/omaflow/rules" "$test_root/state"
 
 make_fake() {
@@ -24,6 +25,15 @@ make_fake omarchy 'true'
 make_fake pactl 'echo "[]"'
 make_fake omarchy-notification-send 'true'
 make_fake gtk-launch 'true'
+cat >"$fake_bin/omarchy-shell" <<'EOF'
+#!/bin/bash
+echo "omarchy-shell $*" >>"$TEST_CALLS"
+case "$2" in
+  dndState) cat "$TEST_DND_STATE" ;;
+  setDnd) printf '%s\n' "$3" >"$TEST_DND_STATE" ;;
+esac
+EOF
+chmod +x "$fake_bin/omarchy-shell"
 
 run_env() {
   HOME="$test_root" \
@@ -32,6 +42,8 @@ run_env() {
   OMAFLOW_POWER_DIR="$test_root/no-power" \
   OMAFLOW_LID_DIR="$test_root/no-lid" \
   TEST_WIFI="$wifi" \
+  TEST_CALLS="$calls" \
+  TEST_DND_STATE="$dnd_state" \
   PATH="$fake_bin:/usr/bin:/bin" \
     "$@"
 }
@@ -66,22 +78,38 @@ cat >"$rules_dir/timeout-rule.json" <<'EOF'
 }
 EOF
 
+cat >"$rules_dir/zoom-dnd.json" <<'EOF'
+{"schemaVersion":1,"id":"zoom-dnd","name":"Zoom DND","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"dnd","state":"on"}],"until":{"trigger":{"type":"custom","name":"zoom-closed"},"revert":true},"cooldownSeconds":0,"source":"test"}
+EOF
+
+cat >"$rules_dir/revert-actions.json" <<'EOF'
+{"schemaVersion":1,"id":"revert-actions","name":"Revert and actions","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"dnd","state":"on"},{"type":"notify","message":"opening"}],"until":{"trigger":{"type":"custom","name":"revert-actions-closed"},"revert":true,"actions":[{"type":"dnd","state":"on"}]},"cooldownSeconds":0,"source":"test"}
+EOF
+
+cat >"$rules_dir/missing-snapshot.json" <<'EOF'
+{"schemaVersion":1,"id":"missing-snapshot","name":"Missing snapshot","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"dnd","state":"on"}],"until":{"trigger":{"type":"custom","name":"missing-snapshot-closed"},"revert":true,"actions":[{"type":"notify","message":"missing snapshot closed"}]},"cooldownSeconds":0,"source":"test"}
+EOF
+
 echo 'yes:Home' >"$wifi"
+echo off >"$dnd_state"
 run_env "$plugin_dir/bin/omaflow-eval" baseline
 
 : >"$calls"
 echo 'yes:Office' >"$wifi"
 run_env "$plugin_dir/bin/omaflow-eval" connect
 grep -q 'omarchy-notification-send.*office opened' "$calls"
-run_env jq -e '.office.armedAt != null and (.office.armedEpoch | type == "number")' "$state/armed.json" >/dev/null
+run_env jq -e '.office.armedAt != null and (.office.armedEpoch | type == "number") and (.office.execId | type == "string")' \
+  "$state/armed.json" >/dev/null
 [[ $(stat -c '%a' "$state/armed.json") == 600 ]]
 grep -q '"kind":"armed".*"ruleId":"office"' "$state/log.jsonl"
 
+first_exec_id=$(run_env jq -r '.office.execId' "$state/armed.json")
 run_env jq '.office.armedEpoch = 1' "$state/armed.json" >"$state/armed.json.tmp"
 mv "$state/armed.json.tmp" "$state/armed.json"
 chmod 600 "$state/armed.json"
 run_env "$plugin_dir/bin/omaflow-run" office >/dev/null
-run_env jq -e 'keys == ["office"] and .office.armedEpoch > 1' "$state/armed.json" >/dev/null
+run_env jq -e --arg first "$first_exec_id" \
+  'keys == ["office"] and .office.armedEpoch > 1 and .office.execId != $first' "$state/armed.json" >/dev/null
 [[ $(grep -c 'omarchy-notification-send.*office opened' "$calls") == 2 ]]
 
 echo -n >"$wifi"
@@ -90,6 +118,43 @@ grep -q 'omarchy-notification-send.*office closed Office' "$calls"
 run_env jq -e 'has("office") | not' "$state/armed.json" >/dev/null
 run_env jq -e '.kind == "until" and .ruleId == "office" and .status == "ok" and .trigger == "until:wifi-disconnected"' \
   <(grep '"kind":"until".*"ruleId":"office"' "$state/log.jsonl" | tail -1) >/dev/null
+
+echo off >"$dnd_state"
+run_env "$plugin_dir/bin/omaflow-run" zoom-dnd >/dev/null
+[[ $(<"$dnd_state") == on ]]
+run_env "$plugin_dir/bin/omaflow" trigger zoom-closed >/dev/null
+[[ $(<"$dnd_state") == off ]]
+run_env jq -e 'has("zoom-dnd") | not' "$state/armed.json" >/dev/null
+run_env jq -e '.status == "ok" and .detail == "revert: ok"' \
+  <(grep '"kind":"until".*"ruleId":"zoom-dnd"' "$state/log.jsonl" | tail -1) >/dev/null
+
+echo on >"$dnd_state"
+run_env "$plugin_dir/bin/omaflow-run" zoom-dnd >/dev/null
+run_env "$plugin_dir/bin/omaflow" trigger zoom-closed >/dev/null
+[[ $(<"$dnd_state") == on ]]
+
+echo off >"$dnd_state"
+run_env "$plugin_dir/bin/omaflow-run" revert-actions >/dev/null
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow" trigger revert-actions-closed >/dev/null
+mapfile -t dnd_calls < <(grep 'omarchy-shell notifications setDnd' "$calls")
+[[ ${#dnd_calls[@]} == 2 ]]
+[[ ${dnd_calls[0]} == *'setDnd off' ]]
+[[ ${dnd_calls[1]} == *'setDnd on' ]]
+run_env jq -e '.status == "ok" and (.detail | test("revert: partial"))' \
+  <(grep '"kind":"until".*"ruleId":"revert-actions"' "$state/log.jsonl" | tail -1) >/dev/null
+run_env jq -e 'has("revert-actions") | not' "$state/armed.json" >/dev/null
+
+echo off >"$dnd_state"
+run_env "$plugin_dir/bin/omaflow-run" missing-snapshot >/dev/null
+missing_exec_id=$(run_env jq -r '."missing-snapshot".execId' "$state/armed.json")
+rm "$state/snapshots/$missing_exec_id.json"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow" trigger missing-snapshot-closed >/dev/null 2>&1
+grep -q 'omarchy-notification-send.*missing snapshot closed' "$calls"
+run_env jq -e 'has("missing-snapshot") | not' "$state/armed.json" >/dev/null
+run_env jq -e '.status == "ok" and .detail == "revert: skipped — snapshot expired or missing"' \
+  <(grep '"kind":"until".*"ruleId":"missing-snapshot"' "$state/log.jsonl" | tail -1) >/dev/null
 
 : >"$calls"
 run_env "$plugin_dir/bin/omaflow-run" timeout-rule >/dev/null
@@ -146,6 +211,33 @@ if run_env "$plugin_dir/bin/omaflow-validate" "$empty_until" >"$test_root/empty.
   exit 1
 fi
 grep -q 'until.actions must be a non-empty array' "$test_root/empty.out"
+
+no_close="$test_root/no-close.json"
+cat >"$no_close" <<'EOF'
+{"schemaVersion":1,"id":"bad-no-close","name":"Bad no close","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"notify","message":"open"}],"until":{"trigger":{"type":"wifi-disconnected"}},"source":"test"}
+EOF
+if run_env "$plugin_dir/bin/omaflow-validate" "$no_close" >"$test_root/no-close.out"; then
+  echo 'until without actions or revert unexpectedly validated' >&2
+  exit 1
+fi
+grep -q 'until must have revert: true or 1..10 actions' "$test_root/no-close.out"
+
+bad_revert="$test_root/bad-revert.json"
+cat >"$bad_revert" <<'EOF'
+{"schemaVersion":1,"id":"bad-revert","name":"Bad revert","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"dnd","state":"on"}],"until":{"trigger":{"type":"wifi-disconnected"},"revert":"yes"},"source":"test"}
+EOF
+if run_env "$plugin_dir/bin/omaflow-validate" "$bad_revert" >"$test_root/bad-revert.out"; then
+  echo 'non-boolean until revert unexpectedly validated' >&2
+  exit 1
+fi
+grep -q 'until.revert must be true' "$test_root/bad-revert.out"
+
+not_revertible="$test_root/not-revertible.json"
+cat >"$not_revertible" <<'EOF'
+{"schemaVersion":1,"id":"not-revertible","name":"Not revertible","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"notify","message":"open"}],"until":{"trigger":{"type":"wifi-disconnected"},"revert":true},"source":"test"}
+EOF
+warning_output=$(run_env "$plugin_dir/bin/omaflow-validate" "$not_revertible")
+grep -q "^warn: nothing in this rule's actions can be reverted" <<<"$warning_output"
 
 unknown_until="$test_root/unknown-until.json"
 cat >"$unknown_until" <<'EOF'

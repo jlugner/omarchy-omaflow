@@ -398,7 +398,8 @@ module Omaflow
         next unless event
 
         trigger_type = rule.dig('until', 'trigger', 'type')
-        Executor.run_until(rule_id, trigger: "until:#{trigger_type}", trigger_data: event['data'] || {})
+        detail = revert_until(rule, armed)
+        Executor.run_until(rule_id, trigger: "until:#{trigger_type}", trigger_data: event['data'] || {}, detail:)
         Store.disarm(rule_id)
       rescue JSON::ParserError, IOError
         next
@@ -406,6 +407,15 @@ module Omaflow
         Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule_id,
                            'status' => 'error', 'detail' => "#{e.class}: #{e.message}" })
       end
+    end
+
+    def revert_until(rule, armed)
+      return unless rule.dig('until', 'revert') == true
+
+      outcome = nil
+      Executor.revert(armed['execId']) { outcome = it }
+      outcome ||= { 'status' => 'failed', 'detail' => 'revert outcome unavailable' }
+      ["revert: #{outcome['status']}", outcome['detail']].compact.join(' — ')
     end
 
     def load_armed

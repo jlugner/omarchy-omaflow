@@ -46,15 +46,16 @@ module Omaflow
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
-    def self.run_until(rule_id, trigger:, trigger_data:)
+    def self.run_until(rule_id, trigger:, trigger_data:, detail: nil)
       locked = Store.with_lock('.run.lock') do
-        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :until)
+        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :until,
+                                    detail:)
       end
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
-    def self.revert(exec_id)
-      locked = Store.with_lock('.run.lock') { return new.revert(exec_id) }
+    def self.revert(exec_id, &)
+      locked = Store.with_lock('.run.lock') { return new.revert(exec_id, &) }
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
@@ -63,7 +64,7 @@ module Omaflow
       1
     end
 
-    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:)
+    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:, detail: nil)
       path = Paths.rule_file(rule_id)
       return self.class.fail_stderr('Invalid rule id') unless path
       return self.class.fail_stderr("No such rule: #{rule_id}") unless File.exist?(path)
@@ -76,6 +77,7 @@ module Omaflow
       @phase = phase
       @actions = phase == :until ? @rule.dig('until', 'actions') : @rule['actions']
       @log_kind = phase == :until ? 'until' : 'run'
+      @detail = detail
 
       errors, = Validator.new(@rule).validate
       errors << "rule id '#{@rule['id']}' does not match its filename" unless @rule['id'] == rule_id
@@ -94,11 +96,17 @@ module Omaflow
       status == 'ok' ? 0 : 1
     end
 
-    def revert(exec_id)
-      return self.class.fail_stderr('Invalid execution id') unless exec_id.to_s.match?(EXEC_ID_PATTERN)
+    def revert(exec_id, &outcome)
+      unless exec_id.to_s.match?(EXEC_ID_PATTERN)
+        outcome&.call('status' => 'skipped', 'detail' => 'snapshot expired or missing')
+        return self.class.fail_stderr('Invalid execution id')
+      end
 
       path = File.join(Paths.snapshots_dir, "#{exec_id}.json")
-      return self.class.fail_stderr("No snapshot for execution: #{exec_id}") unless File.exist?(path)
+      unless File.exist?(path)
+        outcome&.call('status' => 'skipped', 'detail' => 'snapshot expired or missing')
+        return self.class.fail_stderr("No snapshot for execution: #{exec_id}")
+      end
 
       snapshot = begin
         parsed = JSON.parse(Store.safe_read(path))
@@ -106,12 +114,16 @@ module Omaflow
       rescue StandardError
         nil
       end
-      return self.class.fail_stderr("Snapshot is not valid JSON: #{path}") unless snapshot
+      unless snapshot
+        outcome&.call('status' => 'failed', 'detail' => 'snapshot is invalid')
+        return self.class.fail_stderr("Snapshot is not valid JSON: #{path}")
+      end
 
       unless snapshot_revertible?(snapshot)
         detail = 'execution has no revertible actions'
         Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => exec_id,
                            'status' => 'not-revertible', 'detail' => detail })
+        outcome&.call('status' => 'not-revertible', 'detail' => detail)
         return self.class.fail_stderr(detail.capitalize)
       end
 
@@ -122,6 +134,7 @@ module Omaflow
       entry = { 'at' => Sys.now_iso, 'kind' => 'revert', 'execId' => exec_id, 'status' => status }
       entry['detail'] = detail if detail
       Store.log_append(entry)
+      outcome&.call('status' => status, 'detail' => detail)
       notify_revert(exec_id, status:, irreversible:)
       status == 'ok' ? 0 : 1
     end
@@ -308,16 +321,18 @@ module Omaflow
 
     def record_run(results:, status:, dry_run:)
       kind = dry_run ? 'dry-run' : @log_kind
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => kind, 'execId' => @exec_id,
-                         'ruleId' => @rule_id, 'ruleName' => rule_name, 'trigger' => @trigger_desc,
-                         'status' => status, 'actions' => results })
+      entry = { 'at' => Sys.now_iso, 'kind' => kind, 'execId' => @exec_id,
+                'ruleId' => @rule_id, 'ruleName' => rule_name, 'trigger' => @trigger_desc,
+                'status' => status, 'actions' => results }
+      entry['detail'] = @detail if @detail
+      Store.log_append(entry)
       return if dry_run || @phase == :until
 
       cooldowns = Store.read_json(Paths.cooldowns_file, {})
       cooldowns[@rule_id] = { 'lastFiredAt' => Sys.now_iso, 'lastFiredEpoch' => Time.now.to_i }
       Store.write_json(Paths.cooldowns_file, cooldowns)
       if status == 'ok' && @rule['until'].is_a?(Hash)
-        Store.arm(@rule_id)
+        Store.arm(@rule_id, exec_id: @exec_id)
       else
         Store.reindex
       end

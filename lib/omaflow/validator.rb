@@ -323,13 +323,21 @@ module Omaflow
       until_block = @rule['until']
       return unless until_block.is_a?(Hash)
 
-      unknown_keys(until_block, %w[trigger actions], '.until')
+      unknown_keys(until_block, %w[trigger actions revert], '.until')
       trigger = until_block['trigger']
       actions = until_block['actions']
+      revert = until_block['revert']
       err('until.trigger must be an object') unless trigger.is_a?(Hash)
-      err('until.actions must be a non-empty array (max 10)') unless actions.is_a?(Array) && actions.size.between?(1, 10)
+      err('until.revert must be true') if until_block.key?('revert') && revert != true
+      if until_block.key?('actions')
+        err('until.actions must be a non-empty array (max 10)') unless actions.is_a?(Array) && actions.size.between?(1, 10)
+      elsif revert != true
+        err('until must have revert: true or 1..10 actions')
+      end
       validate_trigger(trigger, label: '.until.trigger', manual: false) if trigger.is_a?(Hash)
       check_action_list(actions) if actions.is_a?(Array)
+      revertible = @rule.fetch('actions', []).any? { it.is_a?(Hash) && Executor::SNAPSHOTTED.key?(it['type']) }
+      warn("nothing in this rule's actions can be reverted") if revert == true && !revertible
     end
 
     def check_action_list(actions)

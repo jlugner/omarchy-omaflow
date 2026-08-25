@@ -123,10 +123,10 @@ module Omaflow
 
     def armed = read_json(Paths.armed_file, {})
 
-    def arm(rule_id)
+    def arm(rule_id, exec_id:)
       at = Sys.now_iso
       mutate_armed do |rules|
-        rules[rule_id] = { 'armedAt' => at, 'armedEpoch' => Time.now.to_i }
+        rules[rule_id] = { 'armedAt' => at, 'armedEpoch' => Time.now.to_i, 'execId' => exec_id }
         true
       end
       log_append({ 'at' => at, 'kind' => 'armed', 'ruleId' => rule_id, 'status' => 'ok' })
