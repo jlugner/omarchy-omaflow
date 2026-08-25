@@ -79,6 +79,20 @@ Item {
   readonly property var triggerCaptions: ({ "manual": "runs only when you run it", "time": "at a time of day", "interval": "on a repeating timer", "lid-opened": "when the laptop lid opens", "lid-closed": "when the laptop lid closes", "monitor-connected": "when a monitor is plugged in", "monitor-disconnected": "when a monitor is removed", "app-opened": "when a matching window appears", "app-closed": "when a matching window closes", "wifi-connected": "when wifi connects", "wifi-disconnected": "when wifi drops", "power-source": "when the power source changes", "file-created": "when a file lands in a watched folder", "folder-created": "when a folder appears in a watched folder", "git-branch-changed": "when a repo switches branch", "custom": "when you fire this named event" })
   readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-branch": "only while a repo is on a branch", "hey-events": "only with enough events today", "on-ssid": "only on a given wifi" })
   readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "hey-timetrack": "track time in HEY, filed per category", "hey-agenda": "show today\u2019s HEY calendar", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
+  readonly property var triggerProvides: ({
+    "time": ["at"],
+    "monitor-connected": ["name", "description"],
+    "monitor-disconnected": ["name", "description"],
+    "app-opened": ["class", "title"],
+    "app-closed": ["class", "title"],
+    "wifi-connected": ["ssid"],
+    "power-source": ["source"],
+    "file-created": ["name", "path"],
+    "folder-created": ["name", "path"],
+    "git-branch-changed": ["branch", "from", "repo"],
+    "custom": ["name", "at", "your key=value pairs"]
+  })
+
   function prettyType(value) { return String(value).split("-").join(" ") }
 
   function describeTrigger(trigger) {
@@ -1631,6 +1645,57 @@ Item {
                         root.editorTrigger = trigger
                       }
                     }
+                  }
+                }
+
+                Flow {
+                  width: parent.width
+                  spacing: Style.spacing.xs
+                  visible: (root.triggerProvides[String(root.editorTrigger.type)] || []).length > 0
+
+                  Text {
+                    text: "provides"
+                    textFormat: Text.PlainText
+                    color: root.editorInkMuted
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Math.round(Style.font.caption * 0.9)
+                    font.capitalization: Font.AllUppercase
+                    font.letterSpacing: 0.8
+                    anchors.verticalCenter: undefined
+                    topPadding: Style.space(3)
+                  }
+
+                  Repeater {
+                    model: root.triggerProvides[String(root.editorTrigger.type)] || []
+
+                    Rectangle {
+                      required property string modelData
+                      implicitWidth: providesText.implicitWidth + Style.space(12)
+                      implicitHeight: Style.space(20)
+                      radius: height / 2
+                      color: Qt.alpha(root.flowTrigger, 0.1)
+                      border.width: 1
+                      border.color: Qt.alpha(root.flowTrigger, 0.3)
+
+                      Text {
+                        id: providesText
+                        anchors.centerIn: parent
+                        text: modelData.indexOf(" ") >= 0 ? modelData : "{{" + modelData + "}}"
+                        textFormat: Text.PlainText
+                        color: Qt.alpha(root.flowTrigger, 0.95)
+                        font.family: Style.font.menuFamily
+                        font.pixelSize: Math.round(Style.font.caption * 0.9)
+                      }
+                    }
+                  }
+
+                  Text {
+                    text: "usable in any text field below"
+                    textFormat: Text.PlainText
+                    color: root.editorInkMuted
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Math.round(Style.font.caption * 0.9)
+                    topPadding: Style.space(3)
                   }
                 }
 
