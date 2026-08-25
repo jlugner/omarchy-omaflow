@@ -26,6 +26,7 @@ Item {
   property bool editorEnabled: true
   property var editorTrigger: ({ type: "manual" })
   property var editorUntilTrigger: null
+  property bool editorUntilRevert: false
 
   readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "git-branch-changed", "custom"]
   readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-branch", "hey-events", "on-ssid"]
@@ -366,6 +367,7 @@ Item {
     editorActions.append(root.defaultAction("notify"))
     editorUntilActions.clear()
     root.editorUntilTrigger = null
+    root.editorUntilRevert = false
     editorName.text = ""
     editorCooldown.text = "60"
     root.editorLoading = false
@@ -449,8 +451,10 @@ Item {
     root.loadActionsInto(editorActions, rule.actions || [])
     editorUntilActions.clear()
     root.editorUntilTrigger = null
+    root.editorUntilRevert = false
     if (rule.until && rule.until.trigger) {
       root.editorUntilTrigger = root.clone(rule.until.trigger)
+      root.editorUntilRevert = rule.until.revert === true
       root.loadActionsInto(editorUntilActions, rule.until.actions || [])
     }
     if (editorActions.count === 0) editorActions.append(root.defaultAction("notify"))
@@ -528,12 +532,17 @@ Item {
     if (root.editorCreatedAt !== "") rule.createdAt = root.editorCreatedAt
     for (var c = 0; c < editorConditions.count; c++) rule.conditions.push(root.conditionRule(editorConditions.get(c)))
     for (var a = 0; a < editorActions.count; a++) rule.actions.push(root.actionRule(editorActions.get(a)))
-    if (root.editorUntilTrigger !== null && editorUntilActions.count > 0) {
+    if (root.editorUntilTrigger !== null && (editorUntilActions.count > 0 || root.editorUntilRevert)) {
       var untilTrigger = root.clone(root.editorUntilTrigger)
       if (untilTrigger.type === "interval") untilTrigger.minutes = root.integerOrText(untilTrigger.minutes)
-      var untilActions = []
-      for (var u = 0; u < editorUntilActions.count; u++) untilActions.push(root.actionRule(editorUntilActions.get(u)))
-      rule.until = { trigger: untilTrigger, actions: untilActions }
+      var untilBlock = { trigger: untilTrigger }
+      if (root.editorUntilRevert) untilBlock.revert = true
+      if (editorUntilActions.count > 0) {
+        var untilActions = []
+        for (var u = 0; u < editorUntilActions.count; u++) untilActions.push(root.actionRule(editorUntilActions.get(u)))
+        untilBlock.actions = untilActions
+      }
+      rule.until = untilBlock
     }
     var temporaryPath = root.stateHome + "/omaflow/.editor-rule." + Date.now() + ".json"
     var writer = "umask 077; trap 'rm -f -- \"$2\"' EXIT; printf '%s' \"$1\" > \"$2\"; \"$3\" stage-file \"$2\""
@@ -680,6 +689,7 @@ Item {
       if (ut.repo) uwhen += ": " + ut.repo
       if (ut.name) uwhen += ": " + ut.name
       lines.push("Until  " + uwhen)
+      if (rule.until.revert === true) lines.push("  then restore what this rule changed")
       var uacts = rule.until.actions || []
       for (var ua = 0; ua < uacts.length; ua++) {
         var uaction = uacts[ua]
@@ -2339,7 +2349,7 @@ Item {
                 tintColor: root.flowUntil
                 onClicked: {
                   root.editorUntilTrigger = root.defaultTrigger("wifi-disconnected")
-                  if (editorUntilActions.count === 0) editorUntilActions.append(root.defaultAction("notify"))
+                  root.editorUntilRevert = true
                 }
               }
             }
@@ -2392,6 +2402,7 @@ Item {
                     ghost: true
                     onClicked: {
                       root.editorUntilTrigger = null
+                      root.editorUntilRevert = false
                       editorUntilActions.clear()
                     }
                   }
@@ -2401,6 +2412,31 @@ Item {
                   width: parent.width
                   trigger: root.editorUntilTrigger || ({})
                   onEdited: function(trigger) { root.editorUntilTrigger = trigger }
+                }
+
+                Row {
+                  width: parent.width
+                  spacing: Style.spacing.sm
+
+                  WordToggle {
+                    label: "restore what this rule changed"
+                    checked: root.editorUntilRevert
+                    onToggled: root.editorUntilRevert = !root.editorUntilRevert
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - Style.space(230)
+                    visible: root.editorUntilRevert
+                    text: "theme, dnd, nightlight, stay-awake, and audio go back to how they were before this rule fired"
+                    textFormat: Text.PlainText
+                    color: root.editorInkMuted
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Math.round(Style.font.caption * 0.9)
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                  }
                 }
               }
             }
