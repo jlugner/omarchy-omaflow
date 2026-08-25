@@ -2122,7 +2122,7 @@ Item {
                         EditorField {
                           width: parent.width - Style.space(76) - parent.spacing
                           text: String(actionDelegate.model.first || "")
-                          placeholder: "a fixed name, or {{branch}} (optional)"
+                          placeholder: "e.g. Deep work, Meetings, or {{branch}} (optional)"
                           onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
                         }
                       }
