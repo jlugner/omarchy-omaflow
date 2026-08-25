@@ -25,6 +25,7 @@ trigger wifi-disconnected
 trigger power-source
 trigger file-created
 trigger folder-created
+trigger git-branch-changed
 trigger custom
 condition time-between
 condition weekday
@@ -32,6 +33,7 @@ condition on-power
 condition lid-state
 condition monitor-present
 condition app-running
+condition on-branch
 condition on-ssid
 action theme
 action dnd
@@ -71,9 +73,13 @@ fi
     doc.include?(%({"type":"monitor-present","match":{"description":"<substring>"}} (or match.name)))
   abort "custom event timestamp missing" unless doc.include?("{{at}} is the envelope timestamp")
   abort "file trigger template keys missing" unless doc.include?("{{name}} and {{path}} are available")
+  abort "git trigger template keys missing" unless doc.include?("{{branch}}, {{from}}, and {{repo}} are available")
   abort "file trigger summary missing path" unless
     Omaflow::Store.trigger_summary({ "type" => "file-created", "path" => "~/Downloads",
                                      "match" => { "name" => ".pdf" } }) == "file-created: ~/Downloads"
+  abort "git trigger summary missing repo" unless
+    Omaflow::Store.trigger_summary({ "type" => "git-branch-changed", "repo" => "~/project",
+                                     "match" => { "branch" => "main" } }) == "git-branch-changed: ~/project"
 '
 
 grep -q 'gdbus.*org.freedesktop.UPower' "$plugin_dir/Service.qml"

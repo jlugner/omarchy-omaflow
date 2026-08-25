@@ -162,6 +162,89 @@ if validate "$file_unknown_match" >"$test_root/file-unknown-match.out"; then
 fi
 grep -q "error: unknown field in .trigger.match: kind" "$test_root/file-unknown-match.out"
 
+git_good="$test_root/git-good.json"
+cat >"$git_good" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-good", "name": "Git good", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "~/Documents/code/project", "match": {"branch": "feature"}},
+  "conditions": [{"type": "on-branch", "repo": "/tmp/project", "branch": "feature"}],
+  "actions": [{"type": "notify", "message": "{{branch}} from {{from}} in {{repo}}"}], "source": "test"
+}
+EOF
+out=$(validate "$git_good")
+! grep -q "^error:" <<<"$out"
+
+git_missing="$test_root/git-missing.json"
+cat >"$git_missing" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-missing", "name": "Git missing", "enabled": true,
+  "trigger": {"type": "git-branch-changed"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$git_missing" >"$test_root/git-missing.out"; then
+  echo "git trigger without a repo unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: git-branch-changed needs repo" "$test_root/git-missing.out"
+
+git_relative="$test_root/git-relative.json"
+cat >"$git_relative" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-relative", "name": "Git relative", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "Documents/code/project"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$git_relative" >"$test_root/git-relative.out"; then
+  echo "relative git repo unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: git-branch-changed needs repo" "$test_root/git-relative.out"
+
+git_parent="$test_root/git-parent.json"
+cat >"$git_parent" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-parent", "name": "Git parent", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "~/Documents/code/../secrets"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$git_parent" >"$test_root/git-parent.out"; then
+  echo "parent-segment git repo unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: git-branch-changed needs repo" "$test_root/git-parent.out"
+
+git_unknown_match="$test_root/git-unknown-match.json"
+cat >"$git_unknown_match" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-unknown-match", "name": "Git unknown match", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "/tmp/project", "match": {"branch": "main", "remote": "origin"}},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$git_unknown_match" >"$test_root/git-unknown-match.out"; then
+  echo "unknown git match field unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: unknown field in .trigger.match: remote" "$test_root/git-unknown-match.out"
+
+on_branch_missing="$test_root/on-branch-missing.json"
+cat >"$on_branch_missing" <<'EOF'
+{
+  "schemaVersion": 1, "id": "on-branch-missing", "name": "On branch missing", "enabled": true,
+  "trigger": {"type": "manual"},
+  "conditions": [{"type": "on-branch", "repo": "/tmp/project"}],
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$on_branch_missing" >"$test_root/on-branch-missing.out"; then
+  echo "on-branch condition without a branch unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: on-branch needs branch" "$test_root/on-branch-missing.out"
+
 custom_missing="$test_root/custom-missing.json"
 cat >"$custom_missing" <<'EOF'
 {

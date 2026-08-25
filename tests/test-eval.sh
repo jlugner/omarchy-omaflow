@@ -722,4 +722,125 @@ run_env "$plugin_dir/bin/omaflow-eval" files
 ! grep -q 'omarchy-notification-send.*limit-1' "$calls"
 run_env jq -e --arg key "files:$test_root/limit-1" '.[$key] | length == 512' "$state/domains.json" >/dev/null
 
+for number in $(seq 1 9); do
+  rm -f "$rules_dir/limit-$number.json"
+done
+
+git_repo="$test_root/repo"
+git_file_watch="$test_root/git-file-watch"
+mkdir -p "$git_file_watch"
+git init -q "$git_repo"
+printf 'baseline\n' >"$git_repo/tracked.txt"
+git -C "$git_repo" add tracked.txt
+git -C "$git_repo" -c user.name=Omaflow -c user.email=omaflow@example.com commit -qm baseline
+base_branch=$(git -C "$git_repo" branch --show-current)
+cat >"$rules_dir/git-branch.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-branch", "name": "Git branch", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "~/repo"},
+  "actions": [{"type": "notify", "message": "branch {{branch}} from {{from}} repo {{repo}}"}],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/git-branch-match.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-branch-match", "name": "Git branch match", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "~/repo", "match": {"branch": "FEATURE"}},
+  "actions": [{"type": "notify", "message": "matched {{branch}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/on-branch-manual.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "on-branch-manual", "name": "On branch manual", "enabled": true,
+  "trigger": {"type": "manual"},
+  "conditions": [{"type": "on-branch", "repo": "~/repo", "branch": "FEATURE"}],
+  "actions": [{"type": "notify", "message": "manual feature"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/git-file-created.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-file-created", "name": "Git file created", "enabled": true,
+  "trigger": {"type": "file-created", "path": "~/git-file-watch"},
+  "actions": [{"type": "notify", "message": "git file {{name}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*branch' "$calls"
+run_env jq -e --arg git_dir "$git_repo/.git" --arg file_dir "$git_file_watch" \
+  '.dirs | index($git_dir) != null and index($file_dir) != null' "$state/watched-dirs.json" >/dev/null
+run_env jq -e --arg key "files:$git_repo/.git" 'has($key) | not' "$state/domains.json" >/dev/null
+
+git -C "$git_repo" checkout -qb feature
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q "omarchy-notification-send.*branch feature from $base_branch repo $git_repo" "$calls"
+grep -q 'omarchy-notification-send.*matched feature' "$calls"
+: >"$calls"
+run_env /usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
+  rule = Omaflow::Store.rules.find { it["id"] == "on-branch-manual" }
+  evaluator = Omaflow::Evaluator.new("test")
+  evaluator.instance_variable_set(:@rules, [rule])
+  evaluator.instance_variable_set(:@current, Omaflow::Store.read_json(Omaflow::Paths.domains_file, {}))
+  evaluator.send(:fire_matching_rules, { "type" => "manual", "data" => {} })
+'
+grep -q 'omarchy-notification-send.*manual feature' "$calls"
+
+git -C "$git_repo" checkout -q "$base_branch"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q "omarchy-notification-send.*branch $base_branch from feature repo $git_repo" "$calls"
+! grep -q 'omarchy-notification-send.*matched' "$calls"
+: >"$calls"
+run_env /usr/bin/ruby -r "$plugin_dir/lib/omaflow" -e '
+  rule = Omaflow::Store.rules.find { it["id"] == "on-branch-manual" }
+  evaluator = Omaflow::Evaluator.new("test")
+  evaluator.instance_variable_set(:@rules, [rule])
+  evaluator.instance_variable_set(:@current, Omaflow::Store.read_json(Omaflow::Paths.domains_file, {}))
+  evaluator.send(:fire_matching_rules, { "type" => "manual", "data" => {} })
+'
+! grep -q 'omarchy-notification-send.*manual feature' "$calls"
+
+git -C "$git_repo" checkout -q --detach HEAD
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q "omarchy-notification-send.*branch detached from $base_branch repo $git_repo" "$calls"
+run_env jq -e --arg key "git:$git_repo" '.[$key].branch == "detached"' "$state/domains.json" >/dev/null
+
+cp "$git_repo/.git/HEAD" "$test_root/main-head"
+head -c 5000 /dev/zero | tr '\0' x >"$git_repo/.git/HEAD"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*branch' "$calls"
+run_env jq -e --arg key "git:$git_repo" '.[$key].branch == "detached"' "$state/domains.json" >/dev/null
+mv "$test_root/main-head" "$git_repo/.git/HEAD"
+
+git_worktree="$test_root/worktree"
+git -C "$git_repo" worktree add -qb worktree-base "$git_worktree" "$base_branch"
+cat >"$rules_dir/git-worktree.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "git-worktree", "name": "Git worktree", "enabled": true,
+  "trigger": {"type": "git-branch-changed", "repo": "~/worktree"},
+  "actions": [{"type": "notify", "message": "worktree {{branch}} from {{from}}"}],
+  "cooldownSeconds": 0, "source": "test"
+}
+EOF
+worktree_git_dir=$(sed -n 's/^gitdir: //p' "$git_worktree/.git")
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*worktree' "$calls"
+run_env jq -e --arg git_dir "$worktree_git_dir" '.dirs | index($git_dir) != null' "$state/watched-dirs.json" >/dev/null
+run_env jq -e --arg key "files:$worktree_git_dir" 'has($key) | not' "$state/domains.json" >/dev/null
+
+git -C "$git_worktree" checkout -qb worktree-feature
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q 'omarchy-notification-send.*worktree worktree-feature from worktree-base' "$calls"
+
+: >"$calls"
+touch "$git_file_watch/report.txt"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q 'omarchy-notification-send.*git file report.txt' "$calls"
+! grep -q 'omarchy-notification-send.*branch' "$calls"
+
 echo "test-eval: ok"

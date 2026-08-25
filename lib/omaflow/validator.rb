@@ -21,6 +21,7 @@ module Omaflow
       'power-source' => :check_power_trigger,
       'file-created' => :check_file_trigger,
       'folder-created' => :check_file_trigger,
+      'git-branch-changed' => :check_git_trigger,
       'custom' => :check_custom_trigger
     }.freeze
 
@@ -31,6 +32,7 @@ module Omaflow
       'lid-state' => :check_lid_state,
       'monitor-present' => :check_monitor_present,
       'app-running' => :check_app_running,
+      'on-branch' => :check_on_branch,
       'on-ssid' => :check_on_ssid
     }.freeze
 
@@ -182,13 +184,26 @@ module Omaflow
 
     def check_file_trigger(trigger)
       path = trigger['path']
-      valid_path = present_str?(path) && (path.start_with?('~/') || path.start_with?('/')) && !path.split('/').include?('..')
-      err("#{trigger['type']} needs path starting with ~/ or /, at most 200 chars, with no .. segment") unless valid_path
+      err("#{trigger['type']} needs path starting with ~/ or /, at most 200 chars, with no .. segment") unless valid_path?(path)
       match = trigger['match']
       err("#{trigger['type']} match must be an object with an optional plain-string name") if
         !match.nil? && (!match.is_a?(Hash) || (match.key?('name') && !present_str?(match['name'])))
       unknown_keys(trigger, %w[type path match], '.trigger')
       unknown_keys(match, %w[name], '.trigger.match') if match.is_a?(Hash)
+    end
+
+    def check_git_trigger(trigger)
+      err('git-branch-changed needs repo starting with ~/ or /, at most 200 chars, with no .. segment') unless
+        valid_path?(trigger['repo'])
+      match = trigger['match']
+      err('git-branch-changed match must be an object with an optional plain-string branch') if
+        !match.nil? && (!match.is_a?(Hash) || (match.key?('branch') && !present_str?(match['branch'])))
+      unknown_keys(trigger, %w[type repo match], '.trigger')
+      unknown_keys(match, %w[branch], '.trigger.match') if match.is_a?(Hash)
+    end
+
+    def valid_path?(path)
+      present_str?(path) && (path.start_with?('~/') || path.start_with?('/')) && !path.split('/').include?('..')
     end
 
     def check_custom_trigger(trigger)
@@ -256,6 +271,13 @@ module Omaflow
       err('app-running needs match.class or match.title as a plain string') unless present_match?(match, %w[class title])
       unknown_keys(condition, %w[type match], 'app-running condition')
       unknown_keys(match, %w[class title], 'app-running condition match') if match.is_a?(Hash)
+    end
+
+    def check_on_branch(condition)
+      err('on-branch needs repo starting with ~/ or /, at most 200 chars, with no .. segment') unless
+        valid_path?(condition['repo'])
+      err('on-branch needs branch as a plain string') unless present_str?(condition['branch'])
+      unknown_keys(condition, %w[type repo branch], 'on-branch condition')
     end
 
     def check_on_ssid(condition)

@@ -26,8 +26,8 @@ Item {
   property bool editorEnabled: true
   property var editorTrigger: ({ type: "manual" })
 
-  readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "custom"]
-  readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-ssid"]
+  readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "git-branch-changed", "custom"]
+  readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-branch", "on-ssid"]
   readonly property var actionTypes: ["theme", "dnd", "nightlight", "stay-awake", "launch", "workspace", "audio-output", "script", "webhook", "notify", "agent"]
   readonly property var weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
   readonly property var agentOps: ["close-window", "focus-window", "move-window-to-workspace", "notify"]
@@ -76,8 +76,8 @@ Item {
   readonly property color editorHairline: Qt.alpha(foreground, 0.16)
   readonly property color editorInkMuted: Qt.alpha(foreground, 0.55)
   readonly property color editorLine: Qt.alpha(foreground, 0.3)
-  readonly property var triggerCaptions: ({ "manual": "runs only when you run it", "time": "at a time of day", "interval": "on a repeating timer", "lid-opened": "when the laptop lid opens", "lid-closed": "when the laptop lid closes", "monitor-connected": "when a monitor is plugged in", "monitor-disconnected": "when a monitor is removed", "app-opened": "when a matching window appears", "app-closed": "when a matching window closes", "wifi-connected": "when wifi connects", "wifi-disconnected": "when wifi drops", "power-source": "when the power source changes", "file-created": "when a file lands in a watched folder", "folder-created": "when a folder appears in a watched folder", "custom": "when you fire this named event" })
-  readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-ssid": "only on a given wifi" })
+  readonly property var triggerCaptions: ({ "manual": "runs only when you run it", "time": "at a time of day", "interval": "on a repeating timer", "lid-opened": "when the laptop lid opens", "lid-closed": "when the laptop lid closes", "monitor-connected": "when a monitor is plugged in", "monitor-disconnected": "when a monitor is removed", "app-opened": "when a matching window appears", "app-closed": "when a matching window closes", "wifi-connected": "when wifi connects", "wifi-disconnected": "when wifi drops", "power-source": "when the power source changes", "file-created": "when a file lands in a watched folder", "folder-created": "when a folder appears in a watched folder", "git-branch-changed": "when a repo switches branch", "custom": "when you fire this named event" })
+  readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-branch": "only while a repo is on a branch", "on-ssid": "only on a given wifi" })
   readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
   function prettyType(value) { return String(value).split("-").join(" ") }
   property var pickerTarget: null
@@ -195,6 +195,7 @@ Item {
     if (type === "wifi-connected") return { type: type, match: { ssid: "*" } }
     if (type === "power-source") return { type: type, source: "ac" }
     if (type === "file-created" || type === "folder-created") return { type: type, path: "~/Downloads" }
+    if (type === "git-branch-changed") return { type: type, repo: "~/" }
     if (type === "custom") return { type: type, name: "" }
     return { type: type }
   }
@@ -205,6 +206,7 @@ Item {
     else if (type === "weekday") condition.selected = root.weekdays.join(",")
     else if (type === "on-power") condition.choice = "ac"
     else if (type === "lid-state") condition.choice = "open"
+    else if (type === "on-branch") condition.first = "~/"
     return condition
   }
 
@@ -306,6 +308,10 @@ Item {
         condition.first = String((conditions[i].match || {}).class || "")
         condition.second = String((conditions[i].match || {}).title || "")
       }
+      else if (condition.type === "on-branch") {
+        condition.first = String(conditions[i].repo || "")
+        condition.second = String(conditions[i].branch || "")
+      }
       else if (condition.type === "on-ssid") condition.first = String(conditions[i].ssid || "")
       editorConditions.append(condition)
     }
@@ -342,6 +348,7 @@ Item {
       var match = String(condition.first || "").trim() !== "" ? { class: condition.first } : { title: condition.second }
       return { type: condition.type, match: match }
     }
+    if (condition.type === "on-branch") return { type: condition.type, repo: condition.first, branch: condition.second }
     return { type: condition.type, ssid: condition.first }
   }
 
@@ -489,6 +496,7 @@ Item {
     }
     if (t.name) when += ": " + t.name
     if (t.path) when += ": " + t.path
+    if (t.repo) when += ": " + t.repo
     if (t.source) when += ": " + t.source
     lines.push("When   " + when)
     var conds = rule.conditions || []
@@ -498,6 +506,7 @@ Item {
       if (cond.from) text += " " + cond.from + "–" + cond.to
       if (cond.days) text += " " + cond.days.join(", ")
       if (cond.source) text += " " + cond.source
+      if (cond.repo) text += " " + cond.repo + (cond.branch ? " on " + cond.branch : "")
       if (cond.ssid) text += " " + cond.ssid
       if (cond.match) text += " " + (cond.match.description || cond.match.name || cond.match.class || cond.match.title || "")
       lines.push("Only if  " + text)
@@ -1471,6 +1480,53 @@ Item {
                   }
                 }
 
+                Column {
+                  width: parent.width
+                  spacing: Style.spacing.sm
+                  visible: root.editorTrigger.type === "git-branch-changed"
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.sm
+
+                    FieldLabel { text: "repo" }
+
+                    EditorField {
+                      width: parent.width - Style.space(76) - parent.spacing
+                      text: String(root.editorTrigger.repo || "")
+                      placeholder: "~/Documents/code/project"
+                      onTextChanged: {
+                        if (root.editorTrigger.type !== "git-branch-changed") return
+                        if (String(root.editorTrigger.repo || "") === text) return
+                        var trigger = root.clone(root.editorTrigger)
+                        trigger.repo = text
+                        root.editorTrigger = trigger
+                      }
+                    }
+                  }
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.sm
+
+                    FieldLabel { text: "branch" }
+
+                    EditorField {
+                      width: parent.width - Style.space(76) - parent.spacing
+                      text: String((root.editorTrigger.match || {}).branch || "")
+                      placeholder: "branch filter, e.g. main (optional)"
+                      onTextChanged: {
+                        if (root.editorTrigger.type !== "git-branch-changed") return
+                        if (String((root.editorTrigger.match || {}).branch || "") === text) return
+                        var trigger = root.clone(root.editorTrigger)
+                        if (String(text).trim() === "") delete trigger.match
+                        else trigger.match = { branch: text }
+                        root.editorTrigger = trigger
+                      }
+                    }
+                  }
+                }
+
                 Row {
                   width: parent.width
                   spacing: Style.spacing.sm
@@ -1601,6 +1657,40 @@ Item {
                       text: String(conditionDelegate.model.first || "")
                       placeholder: conditionDelegate.model.type === "on-ssid" ? "SSID match" : "monitor name or description"
                       onTextChanged: editorConditions.setProperty(conditionDelegate.index, "first", text)
+                    }
+
+                    Column {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+                      visible: conditionDelegate.model.type === "on-branch"
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        FieldLabel { text: "repo" }
+
+                        EditorField {
+                          width: parent.width - Style.space(76) - parent.spacing
+                          text: String(conditionDelegate.model.first || "")
+                          placeholder: "~/Documents/code/project"
+                          onTextChanged: editorConditions.setProperty(conditionDelegate.index, "first", text)
+                        }
+                      }
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        FieldLabel { text: "branch" }
+
+                        EditorField {
+                          width: parent.width - Style.space(76) - parent.spacing
+                          text: String(conditionDelegate.model.second || "")
+                          placeholder: "branch, e.g. main"
+                          onTextChanged: editorConditions.setProperty(conditionDelegate.index, "second", text)
+                        }
+                      }
                     }
 
                     Column {

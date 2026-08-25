@@ -19,6 +19,7 @@ module Omaflow
         {"type":"power-source","source":"ac"|"battery"}
         {"type":"file-created","path":"~/Downloads","match":{"name":"<substring>"}} (match optional) — path must start with ~/ or / and name matching is a case-insensitive substring; {{name}} and {{path}} are available
         {"type":"folder-created","path":"~/Downloads","match":{"name":"<substring>"}} (match optional) — path must start with ~/ or / and name matching is a case-insensitive substring; {{name}} and {{path}} are available
+        {"type":"git-branch-changed","repo":"~/Documents/code/project","match":{"branch":"<substring>"}} (match optional) — repo must start with ~/ or /, be at most 200 chars, and contain no .. segment; branch matching is a case-insensitive substring, detached HEAD is reported as detached, and {{branch}}, {{from}}, and {{repo}} are available
         {"type":"custom","name":"<lowercase slug>"} — fires through omaflow trigger <name> [key=value ...]; {{at}} is the envelope timestamp
       Conditions (all must hold at fire time):
         {"type":"time-between","from":"HH:MM","to":"HH:MM"}
@@ -27,6 +28,7 @@ module Omaflow
         {"type":"lid-state","state":"open"|"closed"}
         {"type":"monitor-present","match":{"description":"<substring>"}} (or match.name)
         {"type":"app-running","match":{"class":"<substring>"}} (or match.title)
+        {"type":"on-branch","repo":"~/Documents/code/project","branch":"<substring>"} — repo follows the same path rules and branch matching is a case-insensitive substring
         {"type":"on-ssid","ssid":"<substring>"}
       App class/title matching is a case-insensitive substring match against the selected field; prefer stable class fragments such as zoom, slack, or firefox.
       Actions (executed in order):
@@ -41,7 +43,7 @@ module Omaflow
         {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
         {"type":"agent","task":"<what to do>","can":["close-window"|"focus-window"|"move-window-to-workspace"|"notify"],"timeoutSeconds":N (optional, default 120)} — runs an agent at trigger time and costs tokens; task max 300, can is non-empty, timeoutSeconds 10..180, and cooldownSeconds at least 60. Grant only the minimum verbs needed.
-      In notify and webhook messages and agent tasks {{trigger}} is replaced with a description of the firing event. In notify and webhook messages every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{path}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings; agent tasks support only {{trigger}}.
+      In notify and webhook messages and agent tasks {{trigger}} is replaced with a description of the firing event. In notify and webhook messages every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{path}}, {{repo}}, {{branch}}, {{from}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings; agent tasks support only {{trigger}}.
       Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.
       No other trigger, condition, or action types exist. Never invent fields.
     DOC

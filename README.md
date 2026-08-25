@@ -68,9 +68,9 @@ omaflow webhooks [add <name> <url> [format] | remove <name>]
 
 ## What rules can do
 
-**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · app opened/closed · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · file or folder appears in a watched directory · named custom events.
+**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · app opened/closed · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · file or folder appears in a watched directory · a repo switches branch · named custom events.
 
-**Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · on a given wifi.
+**Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · repo is on a branch · on a given wifi.
 
 **Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · run an allowed script · send a notification · post to a webhook · ask an agent to choose window targets within a capability envelope.
 
@@ -89,7 +89,7 @@ Fire a custom event with `omaflow trigger deploy-done env=prod`. Notify and webh
 
 For example, opening Slack can enable DND, or closing Zoom can send a notification.
 
-File and folder rules react instantly through inotify when available, with the 45-second heartbeat as a fallback. Dot-files are skipped; browser partial downloads are best filtered with `match.name`, such as `.pdf`.
+File and folder rules react instantly through inotify when available, with the 45-second heartbeat as a fallback. Git HEAD changes ride the same inotify hotline. Dot-files are skipped; browser partial downloads are best filtered with `match.name`, such as `.pdf`.
 
 There is no shell action, on purpose. The agent can only emit typed, allowlisted actions, and every rule is validated against your actual machine (the theme exists, the app is installed) at install time and again before every run.
 

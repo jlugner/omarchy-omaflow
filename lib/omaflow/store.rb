@@ -9,6 +9,8 @@ module Omaflow
     MAX_JSON_BYTES = 262_144
     MAX_RULE_FILES = 200
     WATCH_DIR_LIMIT = 8
+    GIT_REPO_LIMIT = 8
+    INOTIFY_DIR_LIMIT = WATCH_DIR_LIMIT + GIT_REPO_LIMIT
 
     def safe_read(path, max_bytes: MAX_JSON_BYTES)
       File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
@@ -129,6 +131,11 @@ module Omaflow
     end
 
     def watched_dirs(loaded_rules)
+      (file_trigger_dirs(loaded_rules) + git_repos(loaded_rules).filter_map { GitState.git_dir(it) })
+        .sort.uniq.first(INOTIFY_DIR_LIMIT)
+    end
+
+    def file_trigger_dirs(loaded_rules)
       loaded_rules.filter_map do |rule|
         trigger = rule['trigger']
         next unless rule['enabled'] == true && trigger.is_a?(Hash)
@@ -138,6 +145,27 @@ module Omaflow
       rescue StandardError
         nil
       end.sort.uniq.first(WATCH_DIR_LIMIT)
+    end
+
+    def git_repos(loaded_rules)
+      loaded_rules.flat_map do |rule|
+        next [] unless rule['enabled'] == true
+
+        trigger = rule['trigger'].is_a?(Hash) ? rule['trigger'] : {}
+        conditions = rule['conditions'].is_a?(Array) ? rule['conditions'].grep(Hash) : []
+        paths = []
+        paths << trigger['repo'] if trigger['type'] == 'git-branch-changed' && trigger['repo'].is_a?(String)
+        conditions.each do |condition|
+          paths << condition['repo'] if condition['type'] == 'on-branch' && condition['repo'].is_a?(String)
+        end
+        paths.filter_map { safe_expand_path(it) }
+      end.sort.uniq.first(GIT_REPO_LIMIT)
+    end
+
+    def safe_expand_path(path)
+      File.expand_path(path)
+    rescue StandardError
+      nil
     end
 
     def index_entry(rule, cooldowns)
@@ -164,6 +192,7 @@ module Omaflow
         elsif match['class'] then ": #{match['class']}"
         elsif match['title'] then ": #{match['title']}"
         elsif trigger['path'] then ": #{trigger['path']}"
+        elsif trigger['repo'] then ": #{trigger['repo']}"
         elsif match['name'] then ": #{match['name']}"
         elsif match['ssid'] then ": #{match['ssid']}"
         elsif match['known'] == false then ': unknown network'

@@ -10,6 +10,7 @@ module Omaflow
     WINDOW_LIMIT = 100
     WINDOW_EVENT_LIMIT = 10
     WATCH_DIR_LIMIT = Store::WATCH_DIR_LIMIT
+    GIT_REPO_LIMIT = Store::GIT_REPO_LIMIT
     FILE_ENTRY_LIMIT = 512
     FILE_EVENT_LIMIT = 10
 
@@ -29,8 +30,11 @@ module Omaflow
       @weekday = @now.strftime('%a').downcase
       @previous = previous_domains
       @rules = Store.rules
-      @watched_dirs = Store.watched_dirs(@rules).first(WATCH_DIR_LIMIT)
-      @watched_keys = @watched_dirs.map { file_probe_key(it) }
+      @file_trigger_dirs = Store.file_trigger_dirs(@rules).first(WATCH_DIR_LIMIT)
+      @file_keys = @file_trigger_dirs.map { file_probe_key(it) }
+      @git_repos = Store.git_repos(@rules).first(GIT_REPO_LIMIT)
+      @git_keys = @git_repos.map { git_probe_key(it) }
+      @watched_dirs = Store.watched_dirs(@rules)
       sync_watched_dirs
       @probes = probe_domains
       @current = current_domains
@@ -115,9 +119,13 @@ module Omaflow
       probes['monitors'] = monitors if monitors
       windows = probe_windows
       probes['windows'] = windows if windows
-      @watched_dirs.each do |path|
+      @file_trigger_dirs.each do |path|
         files = probe_directory(path)
         probes[file_probe_key(path)] = files if files
+      end
+      @git_repos.each do |repo|
+        branch = GitState.current_branch(repo)
+        probes[git_probe_key(repo)] = { 'branch' => branch } if branch
       end
       ssid = probe_ssid
       probes['ssid'] = ssid if ssid
@@ -186,10 +194,11 @@ module Omaflow
     end
 
     def file_probe_key(path) = "files:#{path}"
+    def git_probe_key(repo) = "git:#{repo}"
 
     def current_domains
       previous = (@previous || {}).reject do |key, _value|
-        key.start_with?('files:') && !@watched_keys.include?(key)
+        (key.start_with?('files:') && !@file_keys.include?(key)) || (key.start_with?('git:') && !@git_keys.include?(key))
       end
       previous.merge(@probes)
     end
@@ -251,7 +260,7 @@ module Omaflow
     def domain_fresh?(key) = @previous.key?(key) && @probes.key?(key)
 
     def derive_events
-      [*monitor_events, *window_events, *file_events, *wifi_events, *power_events, *lid_events, *time_events]
+      [*monitor_events, *window_events, *file_events, *git_events, *wifi_events, *power_events, *lid_events, *time_events]
     end
 
     def monitor_events
@@ -280,7 +289,7 @@ module Omaflow
     def window_event_data(window) = { 'class' => window['class'], 'title' => window['title'] }
 
     def file_events
-      @watched_dirs.flat_map do |path|
+      @file_trigger_dirs.flat_map do |path|
         key = file_probe_key(path)
         next [] unless domain_fresh?(key)
 
@@ -292,6 +301,20 @@ module Omaflow
           type = entry['dir'] ? 'folder-created' : 'file-created'
           { 'type' => type, 'data' => { 'name' => entry['name'], 'path' => path } }
         end
+      end
+    end
+
+    def git_events
+      @git_repos.filter_map do |repo|
+        key = git_probe_key(repo)
+        next unless domain_fresh?(key)
+
+        previous_branch = @previous.dig(key, 'branch')
+        current_branch = @current.dig(key, 'branch')
+        next if previous_branch == current_branch
+
+        { 'type' => 'git-branch-changed',
+          'data' => { 'repo' => repo, 'branch' => current_branch, 'from' => previous_branch } }
       end
     end
 
@@ -372,6 +395,8 @@ module Omaflow
       when 'power-source' then data['source'] == trigger['source']
       when 'file-created', 'folder-created'
         file_trigger_matches?(trigger, data)
+      when 'git-branch-changed'
+        git_trigger_matches?(trigger, data)
       when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
       when 'interval' then interval_elapsed?(rule)
       when 'custom' then data['name'] == trigger['name']
@@ -384,6 +409,15 @@ module Omaflow
 
       name = trigger.dig('match', 'name')
       name.nil? || data['name'].to_s.downcase.include?(name.downcase)
+    rescue StandardError
+      false
+    end
+
+    def git_trigger_matches?(trigger, data)
+      return false unless data['repo'] == File.expand_path(trigger['repo'])
+
+      branch = trigger.dig('match', 'branch')
+      branch.nil? || data['branch'].to_s.downcase.include?(branch.downcase)
     rescue StandardError
       false
     end
@@ -407,6 +441,7 @@ module Omaflow
       when 'lid-state' then lid_state?(condition['state'])
       when 'monitor-present' then monitor_present?(condition)
       when 'app-running' then app_running?(condition)
+      when 'on-branch' then on_branch?(condition)
       when 'on-ssid' then @current['ssid'].to_s.downcase.include?(condition['ssid'].to_s.downcase)
       else false
       end
@@ -434,6 +469,15 @@ module Omaflow
     def app_matches?(match, window)
       field = match.key?('class') ? 'class' : 'title'
       window[field].to_s.downcase.include?(match[field].to_s.downcase)
+    end
+
+    def on_branch?(condition)
+      key = git_probe_key(File.expand_path(condition['repo']))
+      return false unless @current.key?(key)
+
+      @current.dig(key, 'branch').to_s.downcase.include?(condition['branch'].downcase)
+    rescue StandardError
+      false
     end
 
     def lid_state?(state)
