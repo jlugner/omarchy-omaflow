@@ -47,6 +47,9 @@ jobs:
       - name: Engine integration test
         run: tests/test-eval.sh
 
+      - name: HEY integration test
+        run: tests/test-hey.sh
+
       - name: Authoring pipeline test
         run: tests/test-author.sh
 

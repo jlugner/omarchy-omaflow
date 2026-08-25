@@ -35,10 +35,11 @@ module Omaflow
         rescue IOError
           nil
         end
-        [out.byteslice(0, max_bytes).to_s, waiter.value.success? && !overflow]
+        status = waiter.value
+        [out.byteslice(0, max_bytes).to_s, status.success? && !overflow, status.exitstatus]
       end
     rescue SystemCallError, IOError
-      ['', false]
+      ['', false, nil]
     end
 
     def detached(*argv) = Process.detach(Process.spawn('setsid', *argv, out: File::NULL, err: File::NULL))

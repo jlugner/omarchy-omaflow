@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'securerandom'
+require 'time'
 
 module Omaflow
   class Executor
@@ -16,6 +17,8 @@ module Omaflow
       'audio-output' => :apply_audio_output,
       'script' => :apply_script,
       'webhook' => :apply_webhook,
+      'hey-timetrack' => :apply_hey_timetrack,
+      'hey-agenda' => :apply_hey_agenda,
       'notify' => :apply_notify,
       'agent' => :apply_agent
     }.freeze
@@ -366,6 +369,123 @@ module Omaflow
                       '-H', "Content-Type: #{content_type}", '--data-raw', body, '--', url,
                       out: File::NULL, err: File::NULL)
       posted ? ["#{action['endpoint']} (#{format})", true] : ["POST to #{action['endpoint']} failed", false]
+    end
+
+    def apply_hey_timetrack(action)
+      category = hey_category(action)
+      return ['hey CLI is not installed', false] unless Sys.which('hey')
+
+      case action['mode']
+      when 'start' then start_hey_timetrack(category, check_current: true)
+      when 'stop' then stop_hey_timetrack(category)
+      when 'switch'
+        stopped, ok = stop_hey_timetrack(category)
+        return [stopped, false] unless ok
+
+        started, ok = start_hey_timetrack(category, check_current: false)
+        ["#{stopped}; #{started}", ok]
+      end
+    end
+
+    def hey_category(action)
+      category = action.key?('category') ? template_message(message: action['category']) : ''
+      category = GitState.current_branch(File.expand_path(action['categoryFromRepo'])).to_s if action.key?('categoryFromRepo')
+      sanitize_hey_text(category, max: 100).strip
+    end
+
+    def start_hey_timetrack(category, check_current:)
+      if check_current
+        tracking, error = hey_tracking_state
+        return [error, false] if error
+        return ['already tracking', true] if tracking
+      end
+
+      _output, error = run_hey('timetrack', 'start', label: 'hey timetrack start failed')
+      return [error, false] if error
+
+      Store.write_json(Paths.timetrack_file, { 'category' => category, 'startedAt' => Sys.now_iso })
+      [category.empty? ? 'started' : "started: #{category}", true]
+    end
+
+    def stop_hey_timetrack(category)
+      tracking, error = hey_tracking_state
+      return [error, false] if error
+      return ['not tracking', true] unless tracking
+
+      state = Store.read_json(Paths.timetrack_file, {})
+      filed_under = state['category'].is_a?(String) ? state['category'] : category
+      filed_under = sanitize_hey_text(filed_under, max: 100).strip
+      argv = %w[timetrack stop]
+      argv += ['--category', filed_under] unless filed_under.empty?
+      _output, error = run_hey(*argv, label: 'hey timetrack stop failed')
+      return [error, false] if error
+
+      FileUtils.rm_f(Paths.timetrack_file)
+      [filed_under.empty? ? 'stopped' : "stopped: #{filed_under}", true]
+    end
+
+    def hey_tracking_state
+      output, error = run_hey('timetrack', 'current', '--json', label: 'hey timetrack current failed')
+      return [nil, error] if error
+
+      current = JSON.parse(output)
+      [current.is_a?(Hash) && !current.empty?, nil]
+    rescue JSON::ParserError
+      [nil, 'hey timetrack current returned invalid JSON']
+    end
+
+    def apply_hey_agenda(action)
+      return ['hey CLI is not installed', false] unless Sys.which('hey')
+
+      today = Time.now.strftime('%F')
+      output, error = run_hey('event', 'list', '--starts-on', today, '--ends-on', today, '--json',
+                              label: 'hey event list failed')
+      return [error, false] if error
+
+      events = JSON.parse(output)
+      return ['hey event list returned invalid JSON', false] unless events.is_a?(Array)
+      return ['no events today', true] if events.empty? && action.fetch('skipWhenEmpty', true)
+
+      title = sanitize_hey_text(action.fetch('title', 'Today'), max: 80)
+      message = events.empty? ? 'No events today' : agenda_message(events)
+      Sys.notify(title.empty? ? 'Today' : title, message)
+      [message, true]
+    rescue JSON::ParserError
+      ['hey event list returned invalid JSON', false]
+    end
+
+    def agenda_message(events)
+      events.first(12).map do |event|
+        event = {} unless event.is_a?(Hash)
+        "#{agenda_start(event)}  #{agenda_summary(event)}"
+      end.join("\n")[0, 1000]
+    end
+
+    def agenda_start(event)
+      values = %w[start starts_at startsAt].filter_map { event[it] }
+      values.each do |value|
+        return Time.iso8601(value.to_s).strftime('%H:%M')
+      rescue ArgumentError
+        next
+      end
+      sanitize_hey_text(values.first, max: 16)
+    end
+
+    def agenda_summary(event)
+      value = %w[summary title name].filter_map { event[it] }.first
+      sanitize_hey_text(value, max: 80)
+    end
+
+    def sanitize_hey_text(value, max:)
+      value.to_s.scrub.gsub(/[[:cntrl:]]/, '').sub(/\A-+/, '')[0, max]
+    end
+
+    def run_hey(*argv, label:)
+      output, ok, status = Sys.capture('hey', *argv, timeout: 30, max_bytes: Store::MAX_JSON_BYTES)
+      return [output, nil] if ok
+
+      detail = status == 3 ? 'hey is not logged in; run: hey auth login' : label
+      [nil, detail]
     end
 
     def webhook_body(format:, message:)

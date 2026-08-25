@@ -29,6 +29,7 @@ module Omaflow
         {"type":"monitor-present","match":{"description":"<substring>"}} (or match.name)
         {"type":"app-running","match":{"class":"<substring>"}} (or match.title)
         {"type":"on-branch","repo":"~/Documents/code/project","branch":"<substring>"} — repo follows the same path rules and branch matching is a case-insensitive substring
+        {"type":"hey-events","atLeast":N} — true when HEY has at least N events today (integer 1..50)
         {"type":"on-ssid","ssid":"<substring>"}
       App class/title matching is a case-insensitive substring match against the selected field; prefer stable class fragments such as zoom, slack, or firefox.
       Actions (executed in order):
@@ -40,10 +41,13 @@ module Omaflow
         {"type":"workspace","number":N}
         {"type":"audio-output","match":"<sink description substring>"}
         {"type":"script","name":"<allowed script name>"} — runs one exact packaged or user-approved executable. name must be from the allowed scripts inventory; no path, arguments, or shell text are permitted in a rule.
-        {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"webhook","endpoint":"<configured endpoint name>","message":"<text>"} — POSTs the message to a user-configured endpoint. endpoint must be one of the configured webhook names; never a URL.
+        {"type":"hey-timetrack","mode":"start"|"stop"|"switch","category":"<text>" (optional),"categoryFromRepo":"<repo path>" (optional)} — category and categoryFromRepo are mutually exclusive; category supports event templating such as {{branch}}, and categoryFromRepo resolves the repo's current branch at trigger time
+        {"type":"hey-agenda","title":"<text>" (optional, default Today),"skipWhenEmpty":true|false (optional, default true)} — notifies with today's HEY events
+        {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"agent","task":"<what to do>","can":["close-window"|"focus-window"|"move-window-to-workspace"|"notify"],"timeoutSeconds":N (optional, default 120)} — runs an agent at trigger time and costs tokens; task max 300, can is non-empty, timeoutSeconds 10..180, and cooldownSeconds at least 60. Grant only the minimum verbs needed.
-      In notify and webhook messages and agent tasks {{trigger}} is replaced with a description of the firing event. In notify and webhook messages every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{path}}, {{repo}}, {{branch}}, {{from}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings; agent tasks support only {{trigger}}.
+      In notify and webhook messages, hey-timetrack category, and agent tasks {{trigger}} is replaced with a description of the firing event. In notify and webhook messages and hey-timetrack category every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{path}}, {{repo}}, {{branch}}, {{from}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings; agent tasks support only {{trigger}}.
+      hey actions talk to the HEY service at trigger time and need hey auth login once
       Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.
       No other trigger, condition, or action types exist. Never invent fields.
     DOC

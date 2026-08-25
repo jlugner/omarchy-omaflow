@@ -70,9 +70,9 @@ omaflow webhooks [add <name> <url> [format] | remove <name>]
 
 **Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · app opened/closed · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · file or folder appears in a watched directory · a repo switches branch · named custom events.
 
-**Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · repo is on a branch · on a given wifi.
+**Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · repo is on a branch · HEY has events today · on a given wifi.
 
-**Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · run an allowed script · send a notification · post to a webhook · ask an agent to choose window targets within a capability envelope.
+**Actions:** set theme · DND · nightlight · stay-awake · launch app (optionally on a workspace) · switch workspace · set audio output · run an allowed script · send a notification · post to a webhook · start, stop, or switch a HEY time track · show today's HEY agenda · ask an agent to choose window targets within a capability envelope.
 
 An agent action sees the current window addresses, classes, titles, and workspaces, then may propose only the verbs granted in the rule: close, focus, move to workspace, or notify. Omaflow validates the whole proposal against that window list and capability envelope before executing anything; one invalid operation rejects all of it.
 
@@ -84,6 +84,37 @@ omaflow webhooks add phone https://ntfy.sh/your-topic ntfy
 ```
 
 Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a default `json` envelope.
+
+### HEY
+
+Install the HEY CLI and sign in once:
+
+```bash
+omarchy pkg aur add hey-cli
+hey auth login
+```
+
+Start tracking when you reach work, file the active track under each branch as it changes, and stop when you leave:
+
+```json
+{"schemaVersion":1,"id":"wifi-start","name":"Start work timer","enabled":true,"trigger":{"type":"wifi-connected","match":{"ssid":"Office"}},"actions":[{"type":"hey-timetrack","mode":"start","category":"Work"}],"source":"start tracking on office wifi"}
+```
+
+```json
+{"schemaVersion":1,"id":"branch-switch","name":"Track current branch","enabled":true,"trigger":{"type":"git-branch-changed","repo":"~/Documents/code/project"},"actions":[{"type":"hey-timetrack","mode":"switch","categoryFromRepo":"~/Documents/code/project"}],"source":"switch time tracking with the current branch"}
+```
+
+```json
+{"schemaVersion":1,"id":"wifi-stop","name":"Stop work timer","enabled":true,"trigger":{"type":"wifi-disconnected"},"actions":[{"type":"hey-timetrack","mode":"stop"}],"source":"stop tracking when wifi disconnects"}
+```
+
+An 08:00 agenda flow can stay quiet on empty days:
+
+```json
+{"schemaVersion":1,"id":"morning-agenda","name":"Morning agenda","enabled":true,"trigger":{"type":"time","at":"08:00"},"actions":[{"type":"hey-agenda","title":"Today","skipWhenEmpty":true}],"source":"show my HEY agenda at 8"}
+```
+
+`hey-events` gates a rule on today's event count. HEY actions contact the service when the rule fires, so they need network access and a valid HEY login. Time-track actions are not revertible.
 
 Fire a custom event with `omaflow trigger deploy-done env=prod`. Notify and webhook messages can use `{{trigger}}` plus event fields such as `{{class}}`, `{{title}}`, `{{env}}`, `{{ssid}}`, `{{name}}`, `{{source}}`, and `{{at}}`. Unknown placeholders become empty strings.
 
@@ -122,6 +153,7 @@ Nothing leaves your machine at trigger time unless a webhook or agent action exp
 omarchy plugin validate ~/.config/omarchy/plugins/jesperlugner.omaflow
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-validate.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-eval.sh
+~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-hey.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-author.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-editor.sh
 ~/.config/omarchy/plugins/jesperlugner.omaflow/tests/test-agent-action.sh

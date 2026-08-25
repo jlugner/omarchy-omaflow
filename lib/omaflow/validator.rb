@@ -33,6 +33,7 @@ module Omaflow
       'monitor-present' => :check_monitor_present,
       'app-running' => :check_app_running,
       'on-branch' => :check_on_branch,
+      'hey-events' => :check_hey_events,
       'on-ssid' => :check_on_ssid
     }.freeze
 
@@ -46,6 +47,8 @@ module Omaflow
       'audio-output' => :check_audio_output,
       'script' => :check_script,
       'webhook' => :check_webhook,
+      'hey-timetrack' => :check_hey_timetrack,
+      'hey-agenda' => :check_hey_agenda,
       'notify' => :check_notify,
       'agent' => :check_agent
     }.freeze
@@ -280,6 +283,12 @@ module Omaflow
       unknown_keys(condition, %w[type repo branch], 'on-branch condition')
     end
 
+    def check_hey_events(condition)
+      err('hey-events needs atLeast as an integer 1..50') unless integer_between?(condition['atLeast'], 1..50)
+      unknown_keys(condition, %w[type atLeast], 'hey-events condition')
+      warn_hey_unavailable
+    end
+
     def check_on_ssid(condition)
       err('on-ssid needs a plain-string ssid') unless present_str?(condition['ssid'])
       unknown_keys(condition, %w[type ssid], 'on-ssid condition')
@@ -380,6 +389,35 @@ module Omaflow
       return if endpoint.empty? || Store.read_json(Paths.webhooks_file, {}).key?(endpoint)
 
       err("no webhook endpoint named '#{endpoint}' — add it with: omaflow webhooks add #{endpoint} <url> [format]")
+    end
+
+    def check_hey_timetrack(action)
+      err('hey-timetrack needs mode: start|stop|switch') unless %w[start stop switch].include?(action['mode'])
+      if action.key?('category') && !safe_str?(action['category'], max: 100)
+        err('hey-timetrack category must be a plain string (max 100, no leading dash or control chars)')
+      end
+      if action.key?('categoryFromRepo') && !valid_path?(action['categoryFromRepo'])
+        err('hey-timetrack categoryFromRepo must start with ~/ or /, be at most 200 chars, and contain no .. segment')
+      end
+      err('hey-timetrack category and categoryFromRepo are mutually exclusive') if
+        action.key?('category') && action.key?('categoryFromRepo')
+      unknown_keys(action, %w[type mode category categoryFromRepo], 'hey-timetrack action')
+      warn_hey_unavailable
+    end
+
+    def check_hey_agenda(action)
+      if action.key?('title') && !safe_str?(action['title'], max: 80)
+        err('hey-agenda title must be a plain string (max 80, no leading dash or control chars)')
+      end
+      err('hey-agenda skipWhenEmpty must be a boolean') if
+        action.key?('skipWhenEmpty') && ![true, false].include?(action['skipWhenEmpty'])
+      unknown_keys(action, %w[type title skipWhenEmpty], 'hey-agenda action')
+      warn_hey_unavailable
+    end
+
+    def warn_hey_unavailable
+      message = 'hey CLI is not installed; this rule will fail until it is'
+      warn(message) unless Sys.which('hey') || warnings.include?(message)
     end
 
     def check_notify(action)

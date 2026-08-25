@@ -34,6 +34,7 @@ condition lid-state
 condition monitor-present
 condition app-running
 condition on-branch
+condition hey-events
 condition on-ssid
 action theme
 action dnd
@@ -44,6 +45,8 @@ action workspace
 action audio-output
 action script
 action webhook
+action hey-timetrack
+action hey-agenda
 action notify
 action agent"
 
@@ -74,6 +77,9 @@ fi
   abort "custom event timestamp missing" unless doc.include?("{{at}} is the envelope timestamp")
   abort "file trigger template keys missing" unless doc.include?("{{name}} and {{path}} are available")
   abort "git trigger template keys missing" unless doc.include?("{{branch}}, {{from}}, and {{repo}} are available")
+  abort "HEY category mutual exclusion missing" unless doc.include?("category and categoryFromRepo are mutually exclusive")
+  abort "HEY trigger-time auth note missing" unless
+    doc.include?("hey actions talk to the HEY service at trigger time and need hey auth login once")
   abort "file trigger summary missing path" unless
     Omaflow::Store.trigger_summary({ "type" => "file-created", "path" => "~/Downloads",
                                      "match" => { "name" => ".pdf" } }) == "file-created: ~/Downloads"

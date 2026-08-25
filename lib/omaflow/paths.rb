@@ -23,6 +23,7 @@ module Omaflow
     def watched_dirs_file = File.join(state_dir, 'watched-dirs.json')
     def cooldowns_file = File.join(state_dir, 'cooldowns.json')
     def seen_ssids_file = File.join(state_dir, 'seen-ssids.json')
+    def timetrack_file = File.join(state_dir, 'timetrack.json')
     def staging_file = File.join(state_dir, 'staging.json')
     def first_run_file = File.join(state_dir, 'first_run_done')
     def snapshots_dir = File.join(state_dir, 'snapshots')
@@ -32,7 +33,7 @@ module Omaflow
     def ensure_dirs
       FileUtils.mkdir_p([rules_dir, state_dir, snapshots_dir, inbox_dir])
       [config_dir, rules_dir, state_dir, snapshots_dir, inbox_dir].each { File.chmod(0o700, it) }
-      [webhooks_file, scripts_file, staging_file, log_file].each { File.chmod(0o600, it) if File.exist?(it) }
+      [webhooks_file, scripts_file, timetrack_file, staging_file, log_file].each { File.chmod(0o600, it) if File.exist?(it) }
     rescue SystemCallError
       nil
     end

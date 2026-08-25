@@ -442,6 +442,7 @@ module Omaflow
       when 'monitor-present' then monitor_present?(condition)
       when 'app-running' then app_running?(condition)
       when 'on-branch' then on_branch?(condition)
+      when 'hey-events' then hey_events?(condition)
       when 'on-ssid' then @current['ssid'].to_s.downcase.include?(condition['ssid'].to_s.downcase)
       else false
       end
@@ -478,6 +479,15 @@ module Omaflow
       @current.dig(key, 'branch').to_s.downcase.include?(condition['branch'].downcase)
     rescue StandardError
       false
+    end
+
+    def hey_events?(condition)
+      return false unless Sys.which('hey')
+
+      today = Time.now.strftime('%F')
+      output, ok = Sys.capture('hey', 'event', 'list', '--starts-on', today, '--ends-on', today, '--count',
+                               timeout: 30, max_bytes: 1024)
+      ok && output.strip.match?(/\A\d+\z/) && output.to_i >= condition['atLeast']
     end
 
     def lid_state?(state)
