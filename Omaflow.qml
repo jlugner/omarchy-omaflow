@@ -27,8 +27,8 @@ Item {
   property var editorTrigger: ({ type: "manual" })
 
   readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "git-branch-changed", "custom"]
-  readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-branch", "on-ssid"]
-  readonly property var actionTypes: ["theme", "dnd", "nightlight", "stay-awake", "launch", "workspace", "audio-output", "script", "webhook", "notify", "agent"]
+  readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-branch", "hey-events", "on-ssid"]
+  readonly property var actionTypes: ["theme", "dnd", "nightlight", "stay-awake", "launch", "workspace", "audio-output", "script", "webhook", "hey-timetrack", "hey-agenda", "notify", "agent"]
   readonly property var weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
   readonly property var agentOps: ["close-window", "focus-window", "move-window-to-workspace", "notify"]
 
@@ -77,8 +77,8 @@ Item {
   readonly property color editorInkMuted: Qt.alpha(foreground, 0.55)
   readonly property color editorLine: Qt.alpha(foreground, 0.3)
   readonly property var triggerCaptions: ({ "manual": "runs only when you run it", "time": "at a time of day", "interval": "on a repeating timer", "lid-opened": "when the laptop lid opens", "lid-closed": "when the laptop lid closes", "monitor-connected": "when a monitor is plugged in", "monitor-disconnected": "when a monitor is removed", "app-opened": "when a matching window appears", "app-closed": "when a matching window closes", "wifi-connected": "when wifi connects", "wifi-disconnected": "when wifi drops", "power-source": "when the power source changes", "file-created": "when a file lands in a watched folder", "folder-created": "when a folder appears in a watched folder", "git-branch-changed": "when a repo switches branch", "custom": "when you fire this named event" })
-  readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-branch": "only while a repo is on a branch", "on-ssid": "only on a given wifi" })
-  readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
+  readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-branch": "only while a repo is on a branch", "hey-events": "only with enough events today", "on-ssid": "only on a given wifi" })
+  readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "hey-timetrack": "track time in HEY, filed per category", "hey-agenda": "show today\u2019s HEY calendar", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
   function prettyType(value) { return String(value).split("-").join(" ") }
   property var pickerTarget: null
   property string pickerQuery: ""
@@ -207,11 +207,13 @@ Item {
     else if (type === "on-power") condition.choice = "ac"
     else if (type === "lid-state") condition.choice = "open"
     else if (type === "on-branch") condition.first = "~/"
+    else if (type === "hey-events") condition.first = "1"
     return condition
   }
 
   function defaultAction(type) {
     var action = { type: type, first: "", second: "", choice: "on", number: "", selected: "" }
+    if (type === "hey-timetrack") action.choice = "switch"
     if (type === "launch") action.number = ""
     else if (type === "workspace") action.number = "1"
     else if (type === "agent") action.selected = "notify"
@@ -312,6 +314,7 @@ Item {
         condition.first = String(conditions[i].repo || "")
         condition.second = String(conditions[i].branch || "")
       }
+      else if (condition.type === "hey-events") condition.first = String(conditions[i].atLeast || "1")
       else if (condition.type === "on-ssid") condition.first = String(conditions[i].ssid || "")
       editorConditions.append(condition)
     }
@@ -323,6 +326,15 @@ Item {
       else if (action.type === "dnd" || action.type === "nightlight" || action.type === "stay-awake") action.choice = String(actions[a].state || "on")
       else if (action.type === "launch") { action.first = String(actions[a].app || ""); action.number = actions[a].workspace === undefined ? "" : String(actions[a].workspace) }
       else if (action.type === "workspace") action.number = String(actions[a].number || "")
+      else if (action.type === "hey-timetrack") {
+        action.choice = String(actions[a].mode || "switch")
+        action.first = String(actions[a].category || "")
+        action.second = String(actions[a].categoryFromRepo || "")
+      }
+      else if (action.type === "hey-agenda") {
+        action.first = String(actions[a].title || "")
+        action.choice = actions[a].skipWhenEmpty === false ? "always" : "skip empty"
+      }
       else if (action.type === "audio-output") action.first = String(actions[a].match || "")
       else if (action.type === "webhook") { action.first = String(actions[a].endpoint || ""); action.second = String(actions[a].message || "") }
       else if (action.type === "notify") { action.first = String(actions[a].title || ""); action.second = String(actions[a].message || "") }
@@ -349,11 +361,23 @@ Item {
       return { type: condition.type, match: match }
     }
     if (condition.type === "on-branch") return { type: condition.type, repo: condition.first, branch: condition.second }
+    if (condition.type === "hey-events") return { type: condition.type, atLeast: root.integerOrText(condition.first) }
     return { type: condition.type, ssid: condition.first }
   }
 
   function actionRule(action) {
     if (action.type === "theme" || action.type === "script") return { type: action.type, name: action.first }
+    if (action.type === "hey-timetrack") {
+      var track = { type: action.type, mode: action.choice }
+      if (String(action.second || "").trim() !== "") track.categoryFromRepo = action.second
+      else if (String(action.first || "").trim() !== "") track.category = action.first
+      return track
+    }
+    if (action.type === "hey-agenda") {
+      var agenda = { type: action.type, skipWhenEmpty: action.choice !== "always" }
+      if (String(action.first || "").trim() !== "") agenda.title = action.first
+      return agenda
+    }
     if (action.type === "dnd" || action.type === "nightlight" || action.type === "stay-awake") return { type: action.type, state: action.choice }
     if (action.type === "launch") {
       var launch = { type: action.type, app: action.first }
@@ -1659,6 +1683,21 @@ Item {
                       onTextChanged: editorConditions.setProperty(conditionDelegate.index, "first", text)
                     }
 
+                    Row {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+                      visible: conditionDelegate.model.type === "hey-events"
+
+                      FieldLabel { text: "at least" }
+
+                      EditorField {
+                        width: parent.width - Style.space(76) - parent.spacing
+                        text: String(conditionDelegate.model.first || "")
+                        placeholder: "number of events today, 1\u201350"
+                        onTextChanged: editorConditions.setProperty(conditionDelegate.index, "first", text)
+                      }
+                    }
+
                     Column {
                       width: parent.width
                       spacing: Style.spacing.sm
@@ -1902,6 +1941,84 @@ Item {
                         text: String(actionDelegate.model.second || "")
                         placeholder: "message"
                         onTextChanged: editorActions.setProperty(actionDelegate.index, "second", text)
+                      }
+                    }
+
+                    Column {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+                      visible: actionDelegate.model.type === "hey-timetrack"
+
+                      Flow {
+                        width: parent.width
+                        spacing: Style.spacing.xs
+
+                        Repeater {
+                          model: ["start", "stop", "switch"]
+
+                          WordToggle {
+                            required property string modelData
+                            label: modelData
+                            checked: String(actionDelegate.model.choice || "switch") === modelData
+                            onToggled: editorActions.setProperty(actionDelegate.index, "choice", modelData)
+                          }
+                        }
+                      }
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        FieldLabel { text: "category" }
+
+                        EditorField {
+                          width: parent.width - Style.space(76) - parent.spacing
+                          text: String(actionDelegate.model.first || "")
+                          placeholder: "e.g. {{branch}} (optional)"
+                          onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
+                        }
+                      }
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        FieldLabel { text: "from repo" }
+
+                        EditorField {
+                          width: parent.width - Style.space(76) - parent.spacing
+                          text: String(actionDelegate.model.second || "")
+                          placeholder: "repo path: use its current branch (optional)"
+                          onTextChanged: editorActions.setProperty(actionDelegate.index, "second", text)
+                        }
+                      }
+                    }
+
+                    Column {
+                      width: parent.width
+                      spacing: Style.spacing.sm
+                      visible: actionDelegate.model.type === "hey-agenda"
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        FieldLabel { text: "title" }
+
+                        EditorField {
+                          width: parent.width - Style.space(76) - parent.spacing
+                          text: String(actionDelegate.model.first || "")
+                          placeholder: "Today (optional)"
+                          onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
+                        }
+                      }
+
+                      ChoiceSelector {
+                        width: parent.width
+                        first: "skip empty"
+                        second: "always"
+                        value: String(actionDelegate.model.choice || "skip empty")
+                        onSelected: function(value) { editorActions.setProperty(actionDelegate.index, "choice", value) }
                       }
                     }
 
