@@ -80,6 +80,82 @@ Item {
   readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-branch": "only while a repo is on a branch", "hey-events": "only with enough events today", "on-ssid": "only on a given wifi" })
   readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "hey-timetrack": "track time in HEY, filed per category", "hey-agenda": "show today\u2019s HEY calendar", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
   function prettyType(value) { return String(value).split("-").join(" ") }
+
+  function describeTrigger(trigger) {
+    var t = trigger || {}
+    var type = String(t.type || "manual")
+    if (type === "manual") return "fires only when you run it — Alt+Return here, or the menu"
+    if (type === "time") return "fires at " + (t.at || "…") + ((t.days || []).length > 0 && (t.days || []).length < 7 ? " on " + t.days.join(", ") : " every day")
+    if (type === "interval") return "fires every " + (t.minutes || "…") + " minutes"
+    if (type === "lid-opened") return "fires when the laptop lid opens"
+    if (type === "lid-closed") return "fires when the laptop lid closes"
+    if (type === "monitor-connected" || type === "monitor-disconnected") {
+      var mon = (t.match || {}).description || (t.match || {}).name || ""
+      return "fires when a monitor matching \u201c" + (mon || "…") + "\u201d is " + (type === "monitor-connected" ? "plugged in" : "removed")
+    }
+    if (type === "app-opened" || type === "app-closed") {
+      var app = (t.match || {}).class || (t.match || {}).title || ""
+      return "fires when a window matching \u201c" + (app || "…") + "\u201d " + (type === "app-opened" ? "appears" : "closes")
+    }
+    if (type === "wifi-connected") {
+      var m = t.match || {}
+      if (m.known === false) return "fires when connecting to a network never seen before"
+      if (m.ssid === "*") return "fires when any wifi connects"
+      return "fires when wifi \u201c" + (m.ssid || "…") + "\u201d connects"
+    }
+    if (type === "wifi-disconnected") return "fires when wifi drops"
+    if (type === "power-source") return "fires when the machine switches to " + (t.source || "ac")
+    if (type === "file-created" || type === "folder-created") {
+      var what = type === "file-created" ? "a file" : "a folder"
+      var name = (t.match || {}).name
+      return "fires when " + what + (name ? " whose name contains \u201c" + name + "\u201d" : "") + " lands in " + (t.path || "…")
+    }
+    if (type === "git-branch-changed") {
+      var gb = (t.match || {}).branch
+      return "fires when " + (t.repo || "…") + " switches branch" + (gb ? " to one containing \u201c" + gb + "\u201d" : "")
+    }
+    if (type === "custom") return "fires when you run: omaflow trigger " + (t.name || "<name>")
+    return root.triggerCaptions[type] || ""
+  }
+
+  function describeCondition(type, first, second, choice, selected) {
+    type = String(type)
+    if (type === "time-between") return "passes only between " + (first || "…") + " and " + (second || "…")
+    if (type === "weekday") return "passes only on " + (String(selected || "").split(",").filter(function(v) { return v !== "" }).join(", ") || "…")
+    if (type === "on-power") return "passes only on " + (choice === "battery" ? "battery power" : "AC power")
+    if (type === "lid-state") return "passes only while the lid is " + (choice || "open")
+    if (type === "monitor-present") return "passes only while a monitor matching \u201c" + (first || "…") + "\u201d is connected"
+    if (type === "app-running") return "passes only while a window matching \u201c" + (first || second || "…") + "\u201d exists"
+    if (type === "on-branch") return "passes only while " + (first || "…") + " is on a branch containing \u201c" + (second || "…") + "\u201d"
+    if (type === "hey-events") return "passes only when your HEY calendar has at least " + (first || "…") + " event" + (String(first) === "1" ? "" : "s") + " today"
+    if (type === "on-ssid") return "passes only while wifi contains \u201c" + (first || "…") + "\u201d"
+    return root.conditionCaptions[type] || ""
+  }
+
+  function describeAction(type, first, second, choice, number, selected) {
+    type = String(type)
+    if (type === "theme") return "switches the desktop theme to \u201c" + (first || "…") + "\u201d"
+    if (type === "dnd") return (choice === "off" ? "turns do-not-disturb off" : "silences notifications (do-not-disturb on)")
+    if (type === "nightlight") return "turns the night filter " + (choice || "on")
+    if (type === "stay-awake") return (choice === "off" ? "lets the machine sleep normally again" : "keeps the machine awake")
+    if (type === "launch") return "opens " + (first || "…") + (String(number || "").trim() !== "" ? " on workspace " + number : "")
+    if (type === "workspace") return "jumps to workspace " + (number || "…")
+    if (type === "audio-output") return "routes sound to the sink matching \u201c" + (first || "…") + "\u201d"
+    if (type === "script") return "runs the allowed script \u201c" + (first || "…") + "\u201d"
+    if (type === "webhook") return "posts \u201c" + (second || "…") + "\u201d to the \u201c" + (first || "…") + "\u201d endpoint"
+    if (type === "notify") return "shows a notification: \u201c" + (second || first || "…") + "\u201d"
+    if (type === "agent") return "asks your agent to: " + (first || "…") + " — allowed: " + (String(selected || "").split(",").filter(function(v) { return v !== "" }).join(", ") || "nothing yet")
+    if (type === "hey-agenda") return "notifies today\u2019s HEY events as a list" + (choice === "always" ? ", even when empty" : "; stays silent when there are none")
+    if (type === "hey-timetrack") {
+      var filing = String(second || "").trim() !== "" ? "file under the branch " + second + " is on right then"
+        : String(first || "").trim() !== "" ? "file under \u201c" + first + "\u201d"
+        : "stay unfiled"
+      if (choice === "start") return "starts HEY time tracking (does nothing if already tracking); the track will " + filing + " once stopped"
+      if (choice === "stop") return "stops the running HEY track and files it (under what it was started for, else " + (String(first || second || "").trim() !== "" ? filing.replace("file ", "") : "unfiled") + ")"
+      return "stops the running HEY track, files it, then starts a fresh one that will " + filing
+    }
+    return root.actionCaptions[type] || ""
+  }
   property var pickerTarget: null
   property string pickerQuery: ""
   property int pickerIndex: 0
@@ -873,6 +949,8 @@ Item {
         color: root.editorInkMuted
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption
+        wrapMode: Text.Wrap
+        maximumLineCount: 2
         elide: Text.ElideRight
       }
     }
@@ -1315,7 +1393,7 @@ Item {
                     id: triggerSelector
                     width: parent.width - whenBadge.width - parent.spacing
                     value: String(root.editorTrigger.type || "manual")
-                    caption: root.triggerCaptions[String(root.editorTrigger.type || "manual")] || ""
+                    caption: root.describeTrigger(root.editorTrigger)
                     onCycle: function(delta) {
                       root.editorTrigger = root.defaultTrigger(root.cycleValue(root.triggerTypes, value, delta))
                     }
@@ -1618,7 +1696,7 @@ Item {
                         id: conditionTypeSelector
                         width: parent.width - ifBadge.width - removeCondition.width - parent.spacing * 2
                         value: String(conditionDelegate.model.type)
-                        caption: root.conditionCaptions[String(conditionDelegate.model.type)] || ""
+                        caption: root.describeCondition(conditionDelegate.model.type, conditionDelegate.model.first, conditionDelegate.model.second, conditionDelegate.model.choice, conditionDelegate.model.selected)
                         onCycle: function(delta) {
                           editorConditions.set(conditionDelegate.index, root.defaultCondition(root.cycleValue(root.conditionTypes, value, delta)))
                         }
@@ -1846,7 +1924,7 @@ Item {
                         id: actionTypeSelector
                         width: parent.width - doBadge.width - actionControls.width - parent.spacing * 2
                         value: String(actionDelegate.model.type)
-                        caption: root.actionCaptions[String(actionDelegate.model.type)] || ""
+                        caption: root.describeAction(actionDelegate.model.type, actionDelegate.model.first, actionDelegate.model.second, actionDelegate.model.choice, actionDelegate.model.number, actionDelegate.model.selected)
                         onCycle: function(delta) {
                           editorActions.set(actionDelegate.index, root.defaultAction(root.cycleValue(root.actionTypes, value, delta)))
                         }
@@ -1974,12 +2052,12 @@ Item {
                         width: parent.width
                         spacing: Style.spacing.sm
 
-                        FieldLabel { text: "category" }
+                        FieldLabel { text: "file under" }
 
                         EditorField {
                           width: parent.width - Style.space(76) - parent.spacing
                           text: String(actionDelegate.model.first || "")
-                          placeholder: "e.g. {{branch}} (optional)"
+                          placeholder: "a fixed name, or {{branch}} (optional)"
                           onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
                         }
                       }
@@ -1988,12 +2066,12 @@ Item {
                         width: parent.width
                         spacing: Style.spacing.sm
 
-                        FieldLabel { text: "from repo" }
+                        FieldLabel { text: "or repo" }
 
                         EditorField {
                           width: parent.width - Style.space(76) - parent.spacing
                           text: String(actionDelegate.model.second || "")
-                          placeholder: "repo path: use its current branch (optional)"
+                          placeholder: "repo path \u2014 file under its branch at that moment"
                           onTextChanged: editorActions.setProperty(actionDelegate.index, "second", text)
                         }
                       }
