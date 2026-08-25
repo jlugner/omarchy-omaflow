@@ -25,6 +25,7 @@ Item {
   property string editorSource: ""
   property bool editorEnabled: true
   property var editorTrigger: ({ type: "manual" })
+  property var editorUntilTrigger: null
 
   readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "git-branch-changed", "custom"]
   readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-branch", "hey-events", "on-ssid"]
@@ -72,6 +73,8 @@ Item {
   readonly property color flowCondition: themeHue(["yellow", "bright_yellow", "color3"], accentColor)
   readonly property color flowAction: themeHue(["magenta", "bright_magenta", "color5"], accentColor)
   readonly property color flowLine: themeHue(["green", "bright_green", "color2"], accentColor)
+  readonly property color flowUntil: themeHue(["orange", "bright_red", "red", "color1"], accentColor)
+  readonly property var untilTypes: triggerTypes.filter(function(t) { return t !== "manual" })
 
   readonly property color editorHairline: Qt.alpha(foreground, 0.16)
   readonly property color editorInkMuted: Qt.alpha(foreground, 0.55)
@@ -175,8 +178,8 @@ Item {
   property int pickerIndex: 0
   readonly property var pickerFiltered: {
     if (pickerTarget === null) return []
-    var types = pickerTarget.kind === "trigger" ? triggerTypes : pickerTarget.kind === "condition" ? conditionTypes : actionTypes
-    var captions = pickerTarget.kind === "trigger" ? triggerCaptions : pickerTarget.kind === "condition" ? conditionCaptions : actionCaptions
+    var types = pickerTarget.kind === "trigger" ? triggerTypes : pickerTarget.kind === "until" ? untilTypes : pickerTarget.kind === "condition" ? conditionTypes : actionTypes
+    var captions = pickerTarget.kind === "trigger" || pickerTarget.kind === "until" ? triggerCaptions : pickerTarget.kind === "condition" ? conditionCaptions : actionCaptions
     var query = pickerQuery.toLowerCase()
     var options = []
     for (var i = 0; i < types.length; i++) {
@@ -190,6 +193,7 @@ Item {
   property var pickerReturn: null
   readonly property color pickerTint: pickerTarget === null ? accentColor
     : pickerTarget.kind === "trigger" ? flowTrigger
+    : pickerTarget.kind === "until" ? flowUntil
     : pickerTarget.kind === "condition" ? flowCondition
     : flowAction
 
@@ -212,6 +216,8 @@ Item {
     if (root.pickerTarget === null || root.pickerFiltered.length === 0) return
     var choice = root.pickerFiltered[Math.max(0, Math.min(root.pickerIndex, root.pickerFiltered.length - 1))].type
     if (root.pickerTarget.kind === "trigger") root.editorTrigger = root.defaultTrigger(choice)
+    else if (root.pickerTarget.kind === "until") root.editorUntilTrigger = root.defaultTrigger(choice)
+    else if (root.pickerTarget.kind === "until-action") editorUntilActions.set(root.pickerTarget.index, root.defaultAction(choice))
     else if (root.pickerTarget.kind === "condition") editorConditions.set(root.pickerTarget.index, root.defaultCondition(choice))
     else editorActions.set(root.pickerTarget.index, root.defaultAction(choice))
     root.closePicker()
@@ -237,6 +243,7 @@ Item {
   ListModel { id: rulesModel }
   ListModel { id: editorConditions; dynamicRoles: true }
   ListModel { id: editorActions; dynamicRoles: true }
+  ListModel { id: editorUntilActions; dynamicRoles: true }
 
   function open(payloadJson) {
     root.confirmDeleteId = ""
@@ -357,6 +364,8 @@ Item {
     editorConditions.clear()
     editorActions.clear()
     editorActions.append(root.defaultAction("notify"))
+    editorUntilActions.clear()
+    root.editorUntilTrigger = null
     editorName.text = ""
     editorCooldown.text = "60"
     root.editorLoading = false
@@ -372,6 +381,35 @@ Item {
     Qt.callLater(function() { editor.forceActiveFocus() })
     describeProcess.command = [root.cliPath, "describe", selected.ruleId]
     describeProcess.running = true
+  }
+
+  function loadActionsInto(store, actions) {
+    store.clear()
+    for (var a = 0; a < actions.length; a++) {
+      var action = root.defaultAction(String(actions[a].type || "notify"))
+      if (action.type === "theme" || action.type === "script") action.first = String(actions[a].name || "")
+      else if (action.type === "dnd" || action.type === "nightlight" || action.type === "stay-awake") action.choice = String(actions[a].state || "on")
+      else if (action.type === "launch") { action.first = String(actions[a].app || ""); action.number = actions[a].workspace === undefined ? "" : String(actions[a].workspace) }
+      else if (action.type === "workspace") action.number = String(actions[a].number || "")
+      else if (action.type === "hey-timetrack") {
+        action.choice = String(actions[a].mode || "switch")
+        action.first = String(actions[a].category || "")
+        action.second = String(actions[a].categoryFromRepo || "")
+      }
+      else if (action.type === "hey-agenda") {
+        action.first = String(actions[a].title || "")
+        action.choice = actions[a].skipWhenEmpty === false ? "always" : "skip empty"
+      }
+      else if (action.type === "audio-output") action.first = String(actions[a].match || "")
+      else if (action.type === "webhook") { action.first = String(actions[a].endpoint || ""); action.second = String(actions[a].message || "") }
+      else if (action.type === "notify") { action.first = String(actions[a].title || ""); action.second = String(actions[a].message || "") }
+      else if (action.type === "agent") {
+        action.first = String(actions[a].task || "")
+        action.selected = (actions[a].can || []).join(",")
+        action.number = actions[a].timeoutSeconds === undefined ? "" : String(actions[a].timeoutSeconds)
+      }
+      store.append(action)
+    }
   }
 
   function loadEditorRule(rule) {
@@ -408,32 +446,12 @@ Item {
       else if (condition.type === "on-ssid") condition.first = String(conditions[i].ssid || "")
       editorConditions.append(condition)
     }
-    editorActions.clear()
-    var actions = rule.actions || []
-    for (var a = 0; a < actions.length; a++) {
-      var action = root.defaultAction(String(actions[a].type || "notify"))
-      if (action.type === "theme" || action.type === "script") action.first = String(actions[a].name || "")
-      else if (action.type === "dnd" || action.type === "nightlight" || action.type === "stay-awake") action.choice = String(actions[a].state || "on")
-      else if (action.type === "launch") { action.first = String(actions[a].app || ""); action.number = actions[a].workspace === undefined ? "" : String(actions[a].workspace) }
-      else if (action.type === "workspace") action.number = String(actions[a].number || "")
-      else if (action.type === "hey-timetrack") {
-        action.choice = String(actions[a].mode || "switch")
-        action.first = String(actions[a].category || "")
-        action.second = String(actions[a].categoryFromRepo || "")
-      }
-      else if (action.type === "hey-agenda") {
-        action.first = String(actions[a].title || "")
-        action.choice = actions[a].skipWhenEmpty === false ? "always" : "skip empty"
-      }
-      else if (action.type === "audio-output") action.first = String(actions[a].match || "")
-      else if (action.type === "webhook") { action.first = String(actions[a].endpoint || ""); action.second = String(actions[a].message || "") }
-      else if (action.type === "notify") { action.first = String(actions[a].title || ""); action.second = String(actions[a].message || "") }
-      else if (action.type === "agent") {
-        action.first = String(actions[a].task || "")
-        action.selected = (actions[a].can || []).join(",")
-        action.number = actions[a].timeoutSeconds === undefined ? "" : String(actions[a].timeoutSeconds)
-      }
-      editorActions.append(action)
+    root.loadActionsInto(editorActions, rule.actions || [])
+    editorUntilActions.clear()
+    root.editorUntilTrigger = null
+    if (rule.until && rule.until.trigger) {
+      root.editorUntilTrigger = root.clone(rule.until.trigger)
+      root.loadActionsInto(editorUntilActions, rule.until.actions || [])
     }
     if (editorActions.count === 0) editorActions.append(root.defaultAction("notify"))
     root.editorLoading = false
@@ -510,6 +528,13 @@ Item {
     if (root.editorCreatedAt !== "") rule.createdAt = root.editorCreatedAt
     for (var c = 0; c < editorConditions.count; c++) rule.conditions.push(root.conditionRule(editorConditions.get(c)))
     for (var a = 0; a < editorActions.count; a++) rule.actions.push(root.actionRule(editorActions.get(a)))
+    if (root.editorUntilTrigger !== null && editorUntilActions.count > 0) {
+      var untilTrigger = root.clone(root.editorUntilTrigger)
+      if (untilTrigger.type === "interval") untilTrigger.minutes = root.integerOrText(untilTrigger.minutes)
+      var untilActions = []
+      for (var u = 0; u < editorUntilActions.count; u++) untilActions.push(root.actionRule(editorUntilActions.get(u)))
+      rule.until = { trigger: untilTrigger, actions: untilActions }
+    }
     var temporaryPath = root.stateHome + "/omaflow/.editor-rule." + Date.now() + ".json"
     var writer = "umask 077; trap 'rm -f -- \"$2\"' EXIT; printf '%s' \"$1\" > \"$2\"; \"$3\" stage-file \"$2\""
     Quickshell.execDetached(["/bin/sh", "-c", writer, "omaflow-editor", JSON.stringify(rule), temporaryPath, root.cliPath])
@@ -645,6 +670,28 @@ Item {
       if (action.task) atext += " → " + action.task
       if (action.can) atext += " [can: " + action.can.join(", ") + "]"
       lines.push((a === 0 ? "Do     " : "       ") + atext)
+    }
+    if (rule.until && rule.until.trigger) {
+      var ut = rule.until.trigger
+      var uwhen = String(ut.type || "?")
+      if (ut.match) uwhen += ": " + (ut.match.description || ut.match.name || ut.match.class || ut.match.title || ut.match.ssid || ut.match.branch || "")
+      if (ut.minutes) uwhen += " after " + ut.minutes + " min"
+      if (ut.path) uwhen += ": " + ut.path
+      if (ut.repo) uwhen += ": " + ut.repo
+      if (ut.name) uwhen += ": " + ut.name
+      lines.push("Until  " + uwhen)
+      var uacts = rule.until.actions || []
+      for (var ua = 0; ua < uacts.length; ua++) {
+        var uaction = uacts[ua]
+        var uatext = String(uaction.type || "?")
+        if (uaction.name) uatext += " → " + uaction.name
+        if (uaction.mode) uatext += " → " + uaction.mode
+        if (uaction.category) uatext += " (file under: " + uaction.category + ")"
+        if (uaction.categoryFromRepo) uatext += " (file under current branch of " + uaction.categoryFromRepo + ")"
+        if (uaction.endpoint) uatext += " → " + uaction.endpoint
+        if (uaction.message) uatext += " \"" + uaction.message + "\""
+        lines.push("  then " + uatext)
+      }
     }
     var cooldown = (rule.cooldownSeconds === undefined || rule.cooldownSeconds === null)
       ? 60 : rule.cooldownSeconds
@@ -923,6 +970,603 @@ Item {
         font.pixelSize: Math.round(Style.font.caption * 0.8)
         font.weight: Font.Bold
         font.letterSpacing: 1.2
+      }
+    }
+  }
+
+  component ActionNode: Column {
+    id: actionDelegate
+    property var store: editorActions
+    property color sectionTint: root.flowAction
+    required property int index
+    required property var model
+    property string selectedWords: String(model.selected || "")
+    width: parent.width
+
+    FocusScope {
+      id: actionNode
+      width: parent.width
+      height: actionCard.height
+      onActiveFocusChanged: root.revealEditorNode(actionNode)
+
+      NodeCard {
+        id: actionCard
+        focusedNode: actionNode.activeFocus
+        rail: actionDelegate.sectionTint
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.sm
+
+          NodeBadge {
+            id: doBadge
+            anchors.top: parent.top
+            label: "DO " + (actionDelegate.index + 1)
+            tint: actionDelegate.sectionTint
+          }
+
+          TypeSelector {
+            id: actionTypeSelector
+            width: parent.width - doBadge.width - actionControls.width - parent.spacing * 2
+            value: String(actionDelegate.model.type)
+            caption: root.describeAction(actionDelegate.model.type, actionDelegate.model.first, actionDelegate.model.second, actionDelegate.model.choice, actionDelegate.model.number, actionDelegate.model.selected)
+            onCycle: function(delta) {
+              actionDelegate.store.set(actionDelegate.index, root.defaultAction(root.cycleValue(root.actionTypes, value, delta)))
+            }
+            onOpenPicker: root.openTypePicker(actionDelegate.store === editorActions ? "action" : "until-action", actionDelegate.index, actionTypeSelector)
+          }
+
+          Row {
+            id: actionControls
+            anchors.top: parent.top
+            spacing: Style.space(6)
+
+            EditorButton {
+              label: "↑"
+              ghost: true
+              enabled: actionDelegate.index > 0
+              opacity: enabled ? 1 : 0.25
+              onClicked: if (enabled) actionDelegate.store.move(actionDelegate.index, actionDelegate.index - 1, 1)
+            }
+
+            EditorButton {
+              label: "↓"
+              ghost: true
+              enabled: actionDelegate.index < actionDelegate.store.count - 1
+              opacity: enabled ? 1 : 0.25
+              onClicked: if (enabled) actionDelegate.store.move(actionDelegate.index, actionDelegate.index + 1, 1)
+            }
+
+            EditorButton {
+              label: "×"
+              ghost: true
+              enabled: actionDelegate.store.count > 1
+              opacity: enabled ? 1 : 0.25
+              onClicked: if (enabled) actionDelegate.store.remove(actionDelegate.index)
+            }
+          }
+        }
+
+        EditorField {
+          width: parent.width
+          visible: actionDelegate.model.type === "theme" || actionDelegate.model.type === "audio-output" || actionDelegate.model.type === "script"
+          text: String(actionDelegate.model.first || "")
+          placeholder: actionDelegate.model.type === "theme" ? "theme name" : actionDelegate.model.type === "script" ? "allowed script name" : "sink match"
+          onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+        }
+
+        ChoiceSelector {
+          width: parent.width
+          visible: actionDelegate.model.type === "dnd" || actionDelegate.model.type === "nightlight" || actionDelegate.model.type === "stay-awake"
+          first: "on"
+          second: "off"
+          value: String(actionDelegate.model.choice || "on")
+          onSelected: function(value) { actionDelegate.store.setProperty(actionDelegate.index, "choice", value) }
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: actionDelegate.model.type === "launch"
+
+          EditorField {
+            width: parent.width * 0.7 - parent.spacing
+            text: String(actionDelegate.model.first || "")
+            placeholder: "app"
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+          }
+
+          EditorField {
+            width: parent.width * 0.3
+            text: String(actionDelegate.model.number || "")
+            placeholder: "workspace (optional)"
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "number", text)
+          }
+        }
+
+        EditorField {
+          width: parent.width
+          visible: actionDelegate.model.type === "workspace"
+          text: String(actionDelegate.model.number || "")
+          placeholder: "workspace 1–10"
+          onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "number", text)
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: actionDelegate.model.type === "webhook"
+
+          EditorField {
+            width: parent.width * 0.35 - parent.spacing
+            text: String(actionDelegate.model.first || "")
+            placeholder: "endpoint"
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+          }
+
+          EditorField {
+            width: parent.width * 0.65
+            text: String(actionDelegate.model.second || "")
+            placeholder: "message"
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "second", text)
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: actionDelegate.model.type === "hey-timetrack"
+
+          Flow {
+            width: parent.width
+            spacing: Style.spacing.xs
+
+            Repeater {
+              model: ["start", "stop", "switch"]
+
+              WordToggle {
+                required property string modelData
+                label: modelData
+                checked: String(actionDelegate.model.choice || "switch") === modelData
+                onToggled: actionDelegate.store.setProperty(actionDelegate.index, "choice", modelData)
+              }
+            }
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            FieldLabel { text: "file under" }
+
+            EditorField {
+              width: parent.width - Style.space(76) - parent.spacing
+              text: String(actionDelegate.model.first || "")
+              placeholder: "e.g. Deep work, Meetings, or {{branch}} (optional)"
+              onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+            }
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            FieldLabel { text: "or repo" }
+
+            EditorField {
+              width: parent.width - Style.space(76) - parent.spacing
+              text: String(actionDelegate.model.second || "")
+              placeholder: "repo path \u2014 file under its branch at that moment"
+              onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "second", text)
+            }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: actionDelegate.model.type === "hey-agenda"
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            FieldLabel { text: "title" }
+
+            EditorField {
+              width: parent.width - Style.space(76) - parent.spacing
+              text: String(actionDelegate.model.first || "")
+              placeholder: "Today (optional)"
+              onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+            }
+          }
+
+          ChoiceSelector {
+            width: parent.width
+            first: "skip empty"
+            second: "always"
+            value: String(actionDelegate.model.choice || "skip empty")
+            onSelected: function(value) { actionDelegate.store.setProperty(actionDelegate.index, "choice", value) }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: actionDelegate.model.type === "notify"
+
+          EditorField {
+            width: parent.width
+            text: String(actionDelegate.model.first || "")
+            placeholder: "title (optional)"
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+          }
+
+          EditorField {
+            width: parent.width
+            text: String(actionDelegate.model.second || "")
+            placeholder: "message"
+            multiline: true
+            preferredHeight: Style.space(48)
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "second", text)
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: actionDelegate.model.type === "agent"
+
+          EditorField {
+            width: parent.width
+            text: String(actionDelegate.model.first || "")
+            placeholder: "agent task"
+            multiline: true
+            preferredHeight: Style.space(48)
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "first", text)
+          }
+
+          Flow {
+            width: parent.width
+            spacing: Style.spacing.xs
+
+            Repeater {
+              model: root.agentOps
+
+              WordToggle {
+                required property string modelData
+                label: modelData
+                checked: root.wordsContain(actionDelegate.selectedWords, modelData)
+                onToggled: actionDelegate.store.setProperty(actionDelegate.index, "selected", root.toggleWord(actionDelegate.selectedWords, modelData))
+              }
+            }
+          }
+
+          EditorField {
+            width: parent.width
+            text: String(actionDelegate.model.number || "")
+            placeholder: "timeoutSeconds (optional)"
+            onTextChanged: actionDelegate.store.setProperty(actionDelegate.index, "number", text)
+          }
+        }
+      }
+    }
+
+    Connector {
+      arrow: true
+      visible: actionDelegate.index < actionDelegate.store.count - 1
+    }
+  }
+
+
+  component TriggerFields: Column {
+    id: triggerFields
+    property var trigger: ({})
+    signal edited(var trigger)
+    spacing: Style.spacing.sm
+
+    Row {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "time"
+
+      FieldLabel { text: "at" }
+
+      EditorField {
+        width: parent.width - Style.space(76) - parent.spacing
+        text: String(triggerFields.trigger.at || "")
+        placeholder: "HH:MM"
+        onTextChanged: {
+          if (triggerFields.trigger.type !== "time") return
+          var trigger = root.clone(triggerFields.trigger)
+          trigger.at = text
+          triggerFields.edited(trigger)
+        }
+      }
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.spacing.xs
+      visible: triggerFields.trigger.type === "time"
+
+      Repeater {
+        model: root.weekdays
+
+        WordToggle {
+          required property string modelData
+          label: modelData
+          checked: (triggerFields.trigger.days || []).indexOf(modelData) >= 0
+          onToggled: {
+            var trigger = root.clone(triggerFields.trigger)
+            var days = (trigger.days || []).slice()
+            var dayIndex = days.indexOf(modelData)
+            if (dayIndex >= 0) days.splice(dayIndex, 1)
+            else days.push(modelData)
+            trigger.days = days
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+    }
+
+    Row {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "interval"
+
+      FieldLabel { text: "minutes" }
+
+      EditorField {
+        width: parent.width - Style.space(76) - parent.spacing
+        text: String(triggerFields.trigger.minutes || "")
+        placeholder: "1–1440"
+        onTextChanged: {
+          if (triggerFields.trigger.type !== "interval") return
+          var trigger = root.clone(triggerFields.trigger)
+          trigger.minutes = text
+          triggerFields.edited(trigger)
+        }
+      }
+    }
+
+    Row {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "monitor-connected" || triggerFields.trigger.type === "monitor-disconnected" || triggerFields.trigger.type === "wifi-connected" || triggerFields.trigger.type === "custom"
+
+      FieldLabel { text: triggerFields.trigger.type === "custom" ? "name" : "match" }
+
+      EditorField {
+        width: parent.width - Style.space(76) - parent.spacing
+        text: triggerFields.trigger.type === "custom" ? String(triggerFields.trigger.name || "")
+          : triggerFields.trigger.type === "wifi-connected" && (triggerFields.trigger.match || {}).known === false ? "unknown"
+          : triggerFields.trigger.type === "wifi-connected" ? String((triggerFields.trigger.match || {}).ssid || "")
+          : String((triggerFields.trigger.match || {}).description || "")
+        placeholder: triggerFields.trigger.type === "wifi-connected" ? "SSID, *, or unknown"
+          : triggerFields.trigger.type === "custom" ? "event name"
+          : "name or description"
+        onTextChanged: {
+          if (triggerFields.trigger.type !== "custom" && triggerFields.trigger.type !== "wifi-connected"
+              && triggerFields.trigger.type !== "monitor-connected" && triggerFields.trigger.type !== "monitor-disconnected") return
+          var trigger = root.clone(triggerFields.trigger)
+          if (trigger.type === "custom") trigger.name = text
+          else if (trigger.type === "wifi-connected") trigger.match = text === "unknown" ? { known: false } : { ssid: text }
+          else trigger.match = { description: text }
+          triggerFields.edited(trigger)
+        }
+      }
+    }
+
+    Column {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "app-opened" || triggerFields.trigger.type === "app-closed"
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        FieldLabel { text: "class" }
+
+        EditorField {
+          width: parent.width - Style.space(76) - parent.spacing
+          text: String((triggerFields.trigger.match || {}).class || "")
+          placeholder: "class match"
+          onTextChanged: {
+            if (triggerFields.trigger.type !== "app-opened" && triggerFields.trigger.type !== "app-closed") return
+            var trigger = root.clone(triggerFields.trigger)
+            if (String((trigger.match || {}).class || "") === text) return
+            trigger.match = { class: text }
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        FieldLabel { text: "title" }
+
+        EditorField {
+          width: parent.width - Style.space(76) - parent.spacing
+          text: String((triggerFields.trigger.match || {}).title || "")
+          placeholder: "title match"
+          onTextChanged: {
+            if (triggerFields.trigger.type !== "app-opened" && triggerFields.trigger.type !== "app-closed") return
+            var trigger = root.clone(triggerFields.trigger)
+            if (String((trigger.match || {}).title || "") === text) return
+            trigger.match = { title: text }
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+    }
+
+    Column {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "file-created" || triggerFields.trigger.type === "folder-created"
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        FieldLabel { text: "folder" }
+
+        EditorField {
+          width: parent.width - Style.space(76) - parent.spacing
+          text: String(triggerFields.trigger.path || "")
+          placeholder: "~/Downloads"
+          onTextChanged: {
+            if (triggerFields.trigger.type !== "file-created" && triggerFields.trigger.type !== "folder-created") return
+            if (String(triggerFields.trigger.path || "") === text) return
+            var trigger = root.clone(triggerFields.trigger)
+            trigger.path = text
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        FieldLabel { text: "name" }
+
+        EditorField {
+          width: parent.width - Style.space(76) - parent.spacing
+          text: String((triggerFields.trigger.match || {}).name || "")
+          placeholder: "name filter, e.g. .pdf (optional)"
+          onTextChanged: {
+            if (triggerFields.trigger.type !== "file-created" && triggerFields.trigger.type !== "folder-created") return
+            if (String((triggerFields.trigger.match || {}).name || "") === text) return
+            var trigger = root.clone(triggerFields.trigger)
+            if (String(text).trim() === "") delete trigger.match
+            else trigger.match = { name: text }
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+    }
+
+    Column {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "git-branch-changed"
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        FieldLabel { text: "repo" }
+
+        EditorField {
+          width: parent.width - Style.space(76) - parent.spacing
+          text: String(triggerFields.trigger.repo || "")
+          placeholder: "~/Documents/code/project"
+          onTextChanged: {
+            if (triggerFields.trigger.type !== "git-branch-changed") return
+            if (String(triggerFields.trigger.repo || "") === text) return
+            var trigger = root.clone(triggerFields.trigger)
+            trigger.repo = text
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        FieldLabel { text: "branch" }
+
+        EditorField {
+          width: parent.width - Style.space(76) - parent.spacing
+          text: String((triggerFields.trigger.match || {}).branch || "")
+          placeholder: "branch filter, e.g. main (optional)"
+          onTextChanged: {
+            if (triggerFields.trigger.type !== "git-branch-changed") return
+            if (String((triggerFields.trigger.match || {}).branch || "") === text) return
+            var trigger = root.clone(triggerFields.trigger)
+            if (String(text).trim() === "") delete trigger.match
+            else trigger.match = { branch: text }
+            triggerFields.edited(trigger)
+          }
+        }
+      }
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.spacing.xs
+      visible: (root.triggerProvides[String(triggerFields.trigger.type)] || []).length > 0
+
+      Text {
+        text: "provides"
+        textFormat: Text.PlainText
+        color: root.editorInkMuted
+        font.family: Style.font.menuFamily
+        font.pixelSize: Math.round(Style.font.caption * 0.9)
+        font.capitalization: Font.AllUppercase
+        font.letterSpacing: 0.8
+        anchors.verticalCenter: undefined
+        topPadding: Style.space(3)
+      }
+
+      Repeater {
+        model: root.triggerProvides[String(triggerFields.trigger.type)] || []
+
+        Rectangle {
+          required property string modelData
+          implicitWidth: providesText.implicitWidth + Style.space(12)
+          implicitHeight: Style.space(20)
+          radius: height / 2
+          color: Qt.alpha(root.flowTrigger, 0.1)
+          border.width: 1
+          border.color: Qt.alpha(root.flowTrigger, 0.3)
+
+          Text {
+            id: providesText
+            anchors.centerIn: parent
+            text: modelData.indexOf(" ") >= 0 ? modelData : "{{" + modelData + "}}"
+            textFormat: Text.PlainText
+            color: Qt.alpha(root.flowTrigger, 0.95)
+            font.family: Style.font.menuFamily
+            font.pixelSize: Math.round(Style.font.caption * 0.9)
+          }
+        }
+      }
+
+      Text {
+        text: "usable in any text field below"
+        textFormat: Text.PlainText
+        color: root.editorInkMuted
+        font.family: Style.font.menuFamily
+        font.pixelSize: Math.round(Style.font.caption * 0.9)
+        topPadding: Style.space(3)
+      }
+    }
+
+    Row {
+      width: parent.width
+      spacing: Style.spacing.sm
+      visible: triggerFields.trigger.type === "power-source"
+
+      FieldLabel { text: "source" }
+
+      ChoiceSelector {
+        width: parent.width - Style.space(76) - parent.spacing
+        first: "ac"
+        second: "battery"
+        value: String(triggerFields.trigger.source || "ac")
+        onSelected: function(value) {
+          if (triggerFields.trigger.type !== "power-source") return
+          var trigger = root.clone(triggerFields.trigger)
+          trigger.source = value
+          triggerFields.edited(trigger)
+        }
       }
     }
   }
@@ -1415,309 +2059,10 @@ Item {
                   }
                 }
 
-                Row {
+                TriggerFields {
                   width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "time"
-
-                  FieldLabel { text: "at" }
-
-                  EditorField {
-                    width: parent.width - Style.space(76) - parent.spacing
-                    text: String(root.editorTrigger.at || "")
-                    placeholder: "HH:MM"
-                    onTextChanged: {
-                      if (root.editorTrigger.type !== "time") return
-                      var trigger = root.clone(root.editorTrigger)
-                      trigger.at = text
-                      root.editorTrigger = trigger
-                    }
-                  }
-                }
-
-                Flow {
-                  width: parent.width
-                  spacing: Style.spacing.xs
-                  visible: root.editorTrigger.type === "time"
-
-                  Repeater {
-                    model: root.weekdays
-
-                    WordToggle {
-                      required property string modelData
-                      label: modelData
-                      checked: (root.editorTrigger.days || []).indexOf(modelData) >= 0
-                      onToggled: {
-                        var trigger = root.clone(root.editorTrigger)
-                        var days = (trigger.days || []).slice()
-                        var dayIndex = days.indexOf(modelData)
-                        if (dayIndex >= 0) days.splice(dayIndex, 1)
-                        else days.push(modelData)
-                        trigger.days = days
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-                }
-
-                Row {
-                  width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "interval"
-
-                  FieldLabel { text: "minutes" }
-
-                  EditorField {
-                    width: parent.width - Style.space(76) - parent.spacing
-                    text: String(root.editorTrigger.minutes || "")
-                    placeholder: "1–1440"
-                    onTextChanged: {
-                      if (root.editorTrigger.type !== "interval") return
-                      var trigger = root.clone(root.editorTrigger)
-                      trigger.minutes = text
-                      root.editorTrigger = trigger
-                    }
-                  }
-                }
-
-                Row {
-                  width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "monitor-connected" || root.editorTrigger.type === "monitor-disconnected" || root.editorTrigger.type === "wifi-connected" || root.editorTrigger.type === "custom"
-
-                  FieldLabel { text: root.editorTrigger.type === "custom" ? "name" : "match" }
-
-                  EditorField {
-                    width: parent.width - Style.space(76) - parent.spacing
-                    text: root.editorTrigger.type === "custom" ? String(root.editorTrigger.name || "")
-                      : root.editorTrigger.type === "wifi-connected" && (root.editorTrigger.match || {}).known === false ? "unknown"
-                      : root.editorTrigger.type === "wifi-connected" ? String((root.editorTrigger.match || {}).ssid || "")
-                      : String((root.editorTrigger.match || {}).description || "")
-                    placeholder: root.editorTrigger.type === "wifi-connected" ? "SSID, *, or unknown"
-                      : root.editorTrigger.type === "custom" ? "event name"
-                      : "name or description"
-                    onTextChanged: {
-                      if (root.editorTrigger.type !== "custom" && root.editorTrigger.type !== "wifi-connected"
-                          && root.editorTrigger.type !== "monitor-connected" && root.editorTrigger.type !== "monitor-disconnected") return
-                      var trigger = root.clone(root.editorTrigger)
-                      if (trigger.type === "custom") trigger.name = text
-                      else if (trigger.type === "wifi-connected") trigger.match = text === "unknown" ? { known: false } : { ssid: text }
-                      else trigger.match = { description: text }
-                      root.editorTrigger = trigger
-                    }
-                  }
-                }
-
-                Column {
-                  width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "app-opened" || root.editorTrigger.type === "app-closed"
-
-                  Row {
-                    width: parent.width
-                    spacing: Style.spacing.sm
-
-                    FieldLabel { text: "class" }
-
-                    EditorField {
-                      width: parent.width - Style.space(76) - parent.spacing
-                      text: String((root.editorTrigger.match || {}).class || "")
-                      placeholder: "class match"
-                      onTextChanged: {
-                        if (root.editorTrigger.type !== "app-opened" && root.editorTrigger.type !== "app-closed") return
-                        var trigger = root.clone(root.editorTrigger)
-                        if (String((trigger.match || {}).class || "") === text) return
-                        trigger.match = { class: text }
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-
-                  Row {
-                    width: parent.width
-                    spacing: Style.spacing.sm
-
-                    FieldLabel { text: "title" }
-
-                    EditorField {
-                      width: parent.width - Style.space(76) - parent.spacing
-                      text: String((root.editorTrigger.match || {}).title || "")
-                      placeholder: "title match"
-                      onTextChanged: {
-                        if (root.editorTrigger.type !== "app-opened" && root.editorTrigger.type !== "app-closed") return
-                        var trigger = root.clone(root.editorTrigger)
-                        if (String((trigger.match || {}).title || "") === text) return
-                        trigger.match = { title: text }
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-                }
-
-                Column {
-                  width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "file-created" || root.editorTrigger.type === "folder-created"
-
-                  Row {
-                    width: parent.width
-                    spacing: Style.spacing.sm
-
-                    FieldLabel { text: "folder" }
-
-                    EditorField {
-                      width: parent.width - Style.space(76) - parent.spacing
-                      text: String(root.editorTrigger.path || "")
-                      placeholder: "~/Downloads"
-                      onTextChanged: {
-                        if (root.editorTrigger.type !== "file-created" && root.editorTrigger.type !== "folder-created") return
-                        if (String(root.editorTrigger.path || "") === text) return
-                        var trigger = root.clone(root.editorTrigger)
-                        trigger.path = text
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-
-                  Row {
-                    width: parent.width
-                    spacing: Style.spacing.sm
-
-                    FieldLabel { text: "name" }
-
-                    EditorField {
-                      width: parent.width - Style.space(76) - parent.spacing
-                      text: String((root.editorTrigger.match || {}).name || "")
-                      placeholder: "name filter, e.g. .pdf (optional)"
-                      onTextChanged: {
-                        if (root.editorTrigger.type !== "file-created" && root.editorTrigger.type !== "folder-created") return
-                        if (String((root.editorTrigger.match || {}).name || "") === text) return
-                        var trigger = root.clone(root.editorTrigger)
-                        if (String(text).trim() === "") delete trigger.match
-                        else trigger.match = { name: text }
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-                }
-
-                Column {
-                  width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "git-branch-changed"
-
-                  Row {
-                    width: parent.width
-                    spacing: Style.spacing.sm
-
-                    FieldLabel { text: "repo" }
-
-                    EditorField {
-                      width: parent.width - Style.space(76) - parent.spacing
-                      text: String(root.editorTrigger.repo || "")
-                      placeholder: "~/Documents/code/project"
-                      onTextChanged: {
-                        if (root.editorTrigger.type !== "git-branch-changed") return
-                        if (String(root.editorTrigger.repo || "") === text) return
-                        var trigger = root.clone(root.editorTrigger)
-                        trigger.repo = text
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-
-                  Row {
-                    width: parent.width
-                    spacing: Style.spacing.sm
-
-                    FieldLabel { text: "branch" }
-
-                    EditorField {
-                      width: parent.width - Style.space(76) - parent.spacing
-                      text: String((root.editorTrigger.match || {}).branch || "")
-                      placeholder: "branch filter, e.g. main (optional)"
-                      onTextChanged: {
-                        if (root.editorTrigger.type !== "git-branch-changed") return
-                        if (String((root.editorTrigger.match || {}).branch || "") === text) return
-                        var trigger = root.clone(root.editorTrigger)
-                        if (String(text).trim() === "") delete trigger.match
-                        else trigger.match = { branch: text }
-                        root.editorTrigger = trigger
-                      }
-                    }
-                  }
-                }
-
-                Flow {
-                  width: parent.width
-                  spacing: Style.spacing.xs
-                  visible: (root.triggerProvides[String(root.editorTrigger.type)] || []).length > 0
-
-                  Text {
-                    text: "provides"
-                    textFormat: Text.PlainText
-                    color: root.editorInkMuted
-                    font.family: Style.font.menuFamily
-                    font.pixelSize: Math.round(Style.font.caption * 0.9)
-                    font.capitalization: Font.AllUppercase
-                    font.letterSpacing: 0.8
-                    anchors.verticalCenter: undefined
-                    topPadding: Style.space(3)
-                  }
-
-                  Repeater {
-                    model: root.triggerProvides[String(root.editorTrigger.type)] || []
-
-                    Rectangle {
-                      required property string modelData
-                      implicitWidth: providesText.implicitWidth + Style.space(12)
-                      implicitHeight: Style.space(20)
-                      radius: height / 2
-                      color: Qt.alpha(root.flowTrigger, 0.1)
-                      border.width: 1
-                      border.color: Qt.alpha(root.flowTrigger, 0.3)
-
-                      Text {
-                        id: providesText
-                        anchors.centerIn: parent
-                        text: modelData.indexOf(" ") >= 0 ? modelData : "{{" + modelData + "}}"
-                        textFormat: Text.PlainText
-                        color: Qt.alpha(root.flowTrigger, 0.95)
-                        font.family: Style.font.menuFamily
-                        font.pixelSize: Math.round(Style.font.caption * 0.9)
-                      }
-                    }
-                  }
-
-                  Text {
-                    text: "usable in any text field below"
-                    textFormat: Text.PlainText
-                    color: root.editorInkMuted
-                    font.family: Style.font.menuFamily
-                    font.pixelSize: Math.round(Style.font.caption * 0.9)
-                    topPadding: Style.space(3)
-                  }
-                }
-
-                Row {
-                  width: parent.width
-                  spacing: Style.spacing.sm
-                  visible: root.editorTrigger.type === "power-source"
-
-                  FieldLabel { text: "source" }
-
-                  ChoiceSelector {
-                    width: parent.width - Style.space(76) - parent.spacing
-                    first: "ac"
-                    second: "battery"
-                    value: String(root.editorTrigger.source || "ac")
-                    onSelected: function(value) {
-                      if (root.editorTrigger.type !== "power-source") return
-                      var trigger = root.clone(root.editorTrigger)
-                      trigger.source = value
-                      root.editorTrigger = trigger
-                    }
-                  }
+                  trigger: root.editorTrigger
+                  onEdited: function(trigger) { root.editorTrigger = trigger }
                 }
               }
             }
@@ -1956,287 +2301,7 @@ Item {
             Repeater {
               model: editorActions
 
-              Column {
-                id: actionDelegate
-                required property int index
-                required property var model
-                property string selectedWords: String(model.selected || "")
-                width: editorChain.width
-
-                FocusScope {
-                  id: actionNode
-                  width: parent.width
-                  height: actionCard.height
-                  onActiveFocusChanged: root.revealEditorNode(actionNode)
-
-                  NodeCard {
-                    id: actionCard
-                    focusedNode: actionNode.activeFocus
-                    rail: root.flowAction
-
-                    Row {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-
-                      NodeBadge {
-                        id: doBadge
-                        anchors.top: parent.top
-                        label: "DO " + (actionDelegate.index + 1)
-                        tint: root.flowAction
-                      }
-
-                      TypeSelector {
-                        id: actionTypeSelector
-                        width: parent.width - doBadge.width - actionControls.width - parent.spacing * 2
-                        value: String(actionDelegate.model.type)
-                        caption: root.describeAction(actionDelegate.model.type, actionDelegate.model.first, actionDelegate.model.second, actionDelegate.model.choice, actionDelegate.model.number, actionDelegate.model.selected)
-                        onCycle: function(delta) {
-                          editorActions.set(actionDelegate.index, root.defaultAction(root.cycleValue(root.actionTypes, value, delta)))
-                        }
-                        onOpenPicker: root.openTypePicker("action", actionDelegate.index, actionTypeSelector)
-                      }
-
-                      Row {
-                        id: actionControls
-                        anchors.top: parent.top
-                        spacing: Style.space(6)
-
-                        EditorButton {
-                          label: "↑"
-                          ghost: true
-                          enabled: actionDelegate.index > 0
-                          opacity: enabled ? 1 : 0.25
-                          onClicked: if (enabled) editorActions.move(actionDelegate.index, actionDelegate.index - 1, 1)
-                        }
-
-                        EditorButton {
-                          label: "↓"
-                          ghost: true
-                          enabled: actionDelegate.index < editorActions.count - 1
-                          opacity: enabled ? 1 : 0.25
-                          onClicked: if (enabled) editorActions.move(actionDelegate.index, actionDelegate.index + 1, 1)
-                        }
-
-                        EditorButton {
-                          label: "×"
-                          ghost: true
-                          enabled: editorActions.count > 1
-                          opacity: enabled ? 1 : 0.25
-                          onClicked: if (enabled) editorActions.remove(actionDelegate.index)
-                        }
-                      }
-                    }
-
-                    EditorField {
-                      width: parent.width
-                      visible: actionDelegate.model.type === "theme" || actionDelegate.model.type === "audio-output" || actionDelegate.model.type === "script"
-                      text: String(actionDelegate.model.first || "")
-                      placeholder: actionDelegate.model.type === "theme" ? "theme name" : actionDelegate.model.type === "script" ? "allowed script name" : "sink match"
-                      onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                    }
-
-                    ChoiceSelector {
-                      width: parent.width
-                      visible: actionDelegate.model.type === "dnd" || actionDelegate.model.type === "nightlight" || actionDelegate.model.type === "stay-awake"
-                      first: "on"
-                      second: "off"
-                      value: String(actionDelegate.model.choice || "on")
-                      onSelected: function(value) { editorActions.setProperty(actionDelegate.index, "choice", value) }
-                    }
-
-                    Row {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-                      visible: actionDelegate.model.type === "launch"
-
-                      EditorField {
-                        width: parent.width * 0.7 - parent.spacing
-                        text: String(actionDelegate.model.first || "")
-                        placeholder: "app"
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                      }
-
-                      EditorField {
-                        width: parent.width * 0.3
-                        text: String(actionDelegate.model.number || "")
-                        placeholder: "workspace (optional)"
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "number", text)
-                      }
-                    }
-
-                    EditorField {
-                      width: parent.width
-                      visible: actionDelegate.model.type === "workspace"
-                      text: String(actionDelegate.model.number || "")
-                      placeholder: "workspace 1–10"
-                      onTextChanged: editorActions.setProperty(actionDelegate.index, "number", text)
-                    }
-
-                    Row {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-                      visible: actionDelegate.model.type === "webhook"
-
-                      EditorField {
-                        width: parent.width * 0.35 - parent.spacing
-                        text: String(actionDelegate.model.first || "")
-                        placeholder: "endpoint"
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                      }
-
-                      EditorField {
-                        width: parent.width * 0.65
-                        text: String(actionDelegate.model.second || "")
-                        placeholder: "message"
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "second", text)
-                      }
-                    }
-
-                    Column {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-                      visible: actionDelegate.model.type === "hey-timetrack"
-
-                      Flow {
-                        width: parent.width
-                        spacing: Style.spacing.xs
-
-                        Repeater {
-                          model: ["start", "stop", "switch"]
-
-                          WordToggle {
-                            required property string modelData
-                            label: modelData
-                            checked: String(actionDelegate.model.choice || "switch") === modelData
-                            onToggled: editorActions.setProperty(actionDelegate.index, "choice", modelData)
-                          }
-                        }
-                      }
-
-                      Row {
-                        width: parent.width
-                        spacing: Style.spacing.sm
-
-                        FieldLabel { text: "file under" }
-
-                        EditorField {
-                          width: parent.width - Style.space(76) - parent.spacing
-                          text: String(actionDelegate.model.first || "")
-                          placeholder: "e.g. Deep work, Meetings, or {{branch}} (optional)"
-                          onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                        }
-                      }
-
-                      Row {
-                        width: parent.width
-                        spacing: Style.spacing.sm
-
-                        FieldLabel { text: "or repo" }
-
-                        EditorField {
-                          width: parent.width - Style.space(76) - parent.spacing
-                          text: String(actionDelegate.model.second || "")
-                          placeholder: "repo path \u2014 file under its branch at that moment"
-                          onTextChanged: editorActions.setProperty(actionDelegate.index, "second", text)
-                        }
-                      }
-                    }
-
-                    Column {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-                      visible: actionDelegate.model.type === "hey-agenda"
-
-                      Row {
-                        width: parent.width
-                        spacing: Style.spacing.sm
-
-                        FieldLabel { text: "title" }
-
-                        EditorField {
-                          width: parent.width - Style.space(76) - parent.spacing
-                          text: String(actionDelegate.model.first || "")
-                          placeholder: "Today (optional)"
-                          onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                        }
-                      }
-
-                      ChoiceSelector {
-                        width: parent.width
-                        first: "skip empty"
-                        second: "always"
-                        value: String(actionDelegate.model.choice || "skip empty")
-                        onSelected: function(value) { editorActions.setProperty(actionDelegate.index, "choice", value) }
-                      }
-                    }
-
-                    Column {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-                      visible: actionDelegate.model.type === "notify"
-
-                      EditorField {
-                        width: parent.width
-                        text: String(actionDelegate.model.first || "")
-                        placeholder: "title (optional)"
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                      }
-
-                      EditorField {
-                        width: parent.width
-                        text: String(actionDelegate.model.second || "")
-                        placeholder: "message"
-                        multiline: true
-                        preferredHeight: Style.space(48)
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "second", text)
-                      }
-                    }
-
-                    Column {
-                      width: parent.width
-                      spacing: Style.spacing.sm
-                      visible: actionDelegate.model.type === "agent"
-
-                      EditorField {
-                        width: parent.width
-                        text: String(actionDelegate.model.first || "")
-                        placeholder: "agent task"
-                        multiline: true
-                        preferredHeight: Style.space(48)
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "first", text)
-                      }
-
-                      Flow {
-                        width: parent.width
-                        spacing: Style.spacing.xs
-
-                        Repeater {
-                          model: root.agentOps
-
-                          WordToggle {
-                            required property string modelData
-                            label: modelData
-                            checked: root.wordsContain(actionDelegate.selectedWords, modelData)
-                            onToggled: editorActions.setProperty(actionDelegate.index, "selected", root.toggleWord(actionDelegate.selectedWords, modelData))
-                          }
-                        }
-                      }
-
-                      EditorField {
-                        width: parent.width
-                        text: String(actionDelegate.model.number || "")
-                        placeholder: "timeoutSeconds (optional)"
-                        onTextChanged: editorActions.setProperty(actionDelegate.index, "number", text)
-                      }
-                    }
-                  }
-                }
-
-                Connector {
-                  arrow: true
-                  visible: actionDelegate.index < editorActions.count - 1
-                }
-              }
+              ActionNode { store: editorActions }
             }
 
             Item {
@@ -2255,6 +2320,122 @@ Item {
                 enabled: editorActions.count < 10
                 opacity: enabled ? 1 : 0.4
                 onClicked: if (enabled) editorActions.append(root.defaultAction("notify"))
+              }
+            }
+
+            Item {
+              width: parent.width
+              visible: root.editorUntilTrigger === null
+              height: addUntilButton.height + Style.spacing.sm
+
+              EditorButton {
+                id: addUntilButton
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: Style.spacing.sm
+                label: "＋ until…"
+                ghost: true
+                accented: true
+                tintColor: root.flowUntil
+                onClicked: {
+                  root.editorUntilTrigger = root.defaultTrigger("wifi-disconnected")
+                  if (editorUntilActions.count === 0) editorUntilActions.append(root.defaultAction("notify"))
+                }
+              }
+            }
+
+            Connector {
+              visible: root.editorUntilTrigger !== null
+              arrow: true
+              label: "UNTIL"
+              tint: root.flowUntil
+            }
+
+            FocusScope {
+              id: untilTriggerNode
+              width: parent.width
+              visible: root.editorUntilTrigger !== null
+              height: root.editorUntilTrigger === null ? 0 : untilCard.height
+              onActiveFocusChanged: root.revealEditorNode(untilTriggerNode)
+
+              NodeCard {
+                id: untilCard
+                focusedNode: untilTriggerNode.activeFocus
+                rail: root.flowUntil
+
+                Row {
+                  width: parent.width
+                  spacing: Style.spacing.sm
+
+                  NodeBadge {
+                    id: untilBadge
+                    anchors.top: parent.top
+                    label: "UNTIL"
+                    tint: root.flowUntil
+                  }
+
+                  TypeSelector {
+                    id: untilSelector
+                    width: parent.width - untilBadge.width - removeUntil.width - parent.spacing * 2
+                    value: String((root.editorUntilTrigger || {}).type || "")
+                    caption: root.editorUntilTrigger === null ? "" : root.describeTrigger(root.editorUntilTrigger).replace("fires", "closes this rule")
+                    onCycle: function(delta) {
+                      root.editorUntilTrigger = root.defaultTrigger(root.cycleValue(root.untilTypes, value, delta))
+                    }
+                    onOpenPicker: root.openTypePicker("until", 0, untilSelector)
+                  }
+
+                  EditorButton {
+                    id: removeUntil
+                    anchors.top: parent.top
+                    label: "×"
+                    ghost: true
+                    onClicked: {
+                      root.editorUntilTrigger = null
+                      editorUntilActions.clear()
+                    }
+                  }
+                }
+
+                TriggerFields {
+                  width: parent.width
+                  trigger: root.editorUntilTrigger || ({})
+                  onEdited: function(trigger) { root.editorUntilTrigger = trigger }
+                }
+              }
+            }
+
+            Connector {
+              visible: root.editorUntilTrigger !== null
+              tint: root.flowUntil
+            }
+
+            Repeater {
+              model: root.editorUntilTrigger === null ? null : editorUntilActions
+
+              ActionNode {
+                store: editorUntilActions
+                sectionTint: root.flowUntil
+              }
+            }
+
+            Item {
+              width: parent.width
+              visible: root.editorUntilTrigger !== null
+              height: root.editorUntilTrigger === null ? 0 : addUntilActionButton.height + Style.spacing.sm
+
+              EditorButton {
+                id: addUntilActionButton
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: Style.spacing.sm
+                label: editorUntilActions.count >= 10 ? "10 actions maximum" : "＋ do when it closes…"
+                ghost: true
+                accented: true
+                tintColor: root.flowUntil
+                enabled: editorUntilActions.count < 10
+                opacity: enabled ? 1 : 0.4
+                onClicked: if (enabled) editorUntilActions.append(root.defaultAction("notify"))
               }
             }
           }
