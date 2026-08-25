@@ -121,45 +121,84 @@ module Omaflow
       end
     end
 
-    def reindex
-      cooldowns = read_json(Paths.cooldowns_file, {})
-      loaded_rules = rules
-      generated_at = Sys.now_iso
-      indexed = loaded_rules.map { index_entry(it, cooldowns) }
-      write_json(Paths.index_file, { 'generatedAt' => generated_at, 'rules' => indexed.sort_by { it['name'].to_s } })
-      write_json(Paths.watched_dirs_file, { 'generatedAt' => generated_at, 'dirs' => watched_dirs(loaded_rules) })
+    def armed = read_json(Paths.armed_file, {})
+
+    def arm(rule_id)
+      at = Sys.now_iso
+      mutate_armed do |rules|
+        rules[rule_id] = { 'armedAt' => at, 'armedEpoch' => Time.now.to_i }
+        true
+      end
+      log_append({ 'at' => at, 'kind' => 'armed', 'ruleId' => rule_id, 'status' => 'ok' })
+      reindex
     end
 
-    def watched_dirs(loaded_rules)
-      (file_trigger_dirs(loaded_rules) + git_repos(loaded_rules).filter_map { GitState.git_dir(it) })
+    def disarm(rule_id, log: false)
+      removed = mutate_armed { it.delete(rule_id) }
+      return unless removed
+
+      log_append({ 'at' => Sys.now_iso, 'kind' => 'disarmed', 'ruleId' => rule_id, 'status' => 'ok' }) if log
+      reindex
+      removed
+    end
+
+    def mutate_armed
+      result = false
+      locked = with_lock('.armed.lock') do
+        rules = File.exist?(Paths.armed_file) ? load_json!(Paths.armed_file, {}) : {}
+        result = yield rules
+        write_json(Paths.armed_file, rules) if result
+      end
+      raise IOError, 'Armed state is busy' unless locked
+
+      result
+    end
+
+    def reindex
+      cooldowns = read_json(Paths.cooldowns_file, {})
+      armed_rules = armed
+      loaded_rules = rules
+      generated_at = Sys.now_iso
+      indexed = loaded_rules.map { index_entry(it, cooldowns, armed_rules) }
+      write_json(Paths.index_file, { 'generatedAt' => generated_at, 'rules' => indexed.sort_by { it['name'].to_s } })
+      write_json(Paths.watched_dirs_file, { 'generatedAt' => generated_at, 'dirs' => watched_dirs(loaded_rules, armed_rules) })
+    end
+
+    def watched_dirs(loaded_rules, armed_rules = armed)
+      (file_trigger_dirs(loaded_rules, armed_rules) + git_repos(loaded_rules, armed_rules).filter_map { GitState.git_dir(it) })
         .sort.uniq.first(INOTIFY_DIR_LIMIT)
     end
 
-    def file_trigger_dirs(loaded_rules)
-      loaded_rules.filter_map do |rule|
-        trigger = rule['trigger']
-        next unless rule['enabled'] == true && trigger.is_a?(Hash)
+    def file_trigger_dirs(loaded_rules, armed_rules = armed)
+      loaded_rules.flat_map { active_triggers(it, armed_rules) }.filter_map do |trigger|
         next unless %w[file-created folder-created].include?(trigger['type']) && trigger['path'].is_a?(String)
 
-        File.expand_path(trigger['path'])
-      rescue StandardError
-        nil
+        safe_expand_path(trigger['path'])
       end.sort.uniq.first(WATCH_DIR_LIMIT)
     end
 
-    def git_repos(loaded_rules)
+    def git_repos(loaded_rules, armed_rules = armed)
       loaded_rules.flat_map do |rule|
-        next [] unless rule['enabled'] == true
-
-        trigger = rule['trigger'].is_a?(Hash) ? rule['trigger'] : {}
         conditions = rule['conditions'].is_a?(Array) ? rule['conditions'].grep(Hash) : []
-        paths = []
-        paths << trigger['repo'] if trigger['type'] == 'git-branch-changed' && trigger['repo'].is_a?(String)
-        conditions.each do |condition|
-          paths << condition['repo'] if condition['type'] == 'on-branch' && condition['repo'].is_a?(String)
+        paths = active_triggers(rule, armed_rules).filter_map do |trigger|
+          trigger['repo'] if trigger['type'] == 'git-branch-changed' && trigger['repo'].is_a?(String)
+        end
+        if rule['enabled'] == true
+          conditions.each do |condition|
+            paths << condition['repo'] if condition['type'] == 'on-branch' && condition['repo'].is_a?(String)
+          end
         end
         paths.filter_map { safe_expand_path(it) }
       end.sort.uniq.first(GIT_REPO_LIMIT)
+    end
+
+    def active_triggers(rule, armed_rules)
+      triggers = []
+      triggers << rule['trigger'] if rule['enabled'] == true && rule['trigger'].is_a?(Hash)
+      until_block = rule['until'].is_a?(Hash) ? rule['until'] : {}
+      until_trigger = until_block['trigger']
+      triggers << until_trigger if armed_rules.key?(rule['id']) && until_trigger.is_a?(Hash)
+      triggers
     end
 
     def safe_expand_path(path)
@@ -168,7 +207,7 @@ module Omaflow
       nil
     end
 
-    def index_entry(rule, cooldowns)
+    def index_entry(rule, cooldowns, armed_rules = armed)
       trigger = rule['trigger'].is_a?(Hash) ? rule['trigger'] : {}
       actions = rule['actions'].is_a?(Array) ? rule['actions'].grep(Hash) : []
       conditions = rule['conditions'].is_a?(Array) ? rule['conditions'] : []
@@ -180,6 +219,7 @@ module Omaflow
         'actionsSummary' => actions.map { it['type'].to_s }.join(', '),
         'actionCount' => actions.size,
         'conditionCount' => conditions.size,
+        'armed' => armed_rules.key?(rule['id']),
         'source' => rule['source'].to_s,
         'lastFired' => cooldowns.dig(rule['id'], 'lastFiredAt').to_s
       }

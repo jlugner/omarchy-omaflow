@@ -47,6 +47,9 @@ jobs:
       - name: Engine integration test
         run: tests/test-eval.sh
 
+      - name: Until lifecycle test
+        run: tests/test-until.sh
+
       - name: HEY integration test
         run: tests/test-hey.sh
 

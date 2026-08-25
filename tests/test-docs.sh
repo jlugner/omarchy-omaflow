@@ -66,6 +66,7 @@ fi
   abort "validator action checks != vocabulary" unless Omaflow::Validator::ACTION_CHECKS.keys.sort == vocab::ACTIONS.sort
   abort "validator trigger checks != vocabulary" unless Omaflow::Validator::TRIGGER_CHECKS.keys.sort == vocab::TRIGGERS.sort
   abort "validator condition checks != vocabulary" unless Omaflow::Validator::CONDITION_CHECKS.keys.sort == vocab::CONDITIONS.sort
+  abort "until missing from rule fields" unless vocab::RULE_FIELDS.include?("until")
   doc = Omaflow::Author::SCHEMA_DOC
   (vocab::ACTIONS + vocab::TRIGGERS + vocab::CONDITIONS).each do |type|
     abort "#{type} missing from the authoring schema doc" unless doc.include?("\"type\":\"#{type}\"")
@@ -80,6 +81,8 @@ fi
   abort "HEY category mutual exclusion missing" unless doc.include?("category and categoryFromRepo are mutually exclusive")
   abort "HEY trigger-time auth note missing" unless
     doc.include?("hey actions talk to the HEY service at trigger time and need hey auth login once")
+  abort "until lifecycle guidance missing" unless
+    doc.include?("when X ... until Y ...") && doc.include?("one-shot timeout")
   abort "file trigger summary missing path" unless
     Omaflow::Store.trigger_summary({ "type" => "file-created", "path" => "~/Downloads",
                                      "match" => { "name" => ".pdf" } }) == "file-created: ~/Downloads"

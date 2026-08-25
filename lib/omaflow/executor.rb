@@ -40,7 +40,16 @@ module Omaflow
     SNAPSHOT_FILE_LIMIT = 200
 
     def self.run(rule_id, dry_run: false, trigger: 'manual', trigger_data: {}, respect_cooldown: false)
-      locked = Store.with_lock('.run.lock') { return new.execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:) }
+      locked = Store.with_lock('.run.lock') do
+        return new.execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase: :rule)
+      end
+      locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
+    end
+
+    def self.run_until(rule_id, trigger:, trigger_data:)
+      locked = Store.with_lock('.run.lock') do
+        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :until)
+      end
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
@@ -54,7 +63,7 @@ module Omaflow
       1
     end
 
-    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:)
+    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:)
       path = Paths.rule_file(rule_id)
       return self.class.fail_stderr('Invalid rule id') unless path
       return self.class.fail_stderr("No such rule: #{rule_id}") unless File.exist?(path)
@@ -64,6 +73,9 @@ module Omaflow
       @trigger_desc = trigger
       @trigger_data = trigger_data.is_a?(Hash) ? trigger_data : {}
       @exec_id = "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(4)}"
+      @phase = phase
+      @actions = phase == :until ? @rule.dig('until', 'actions') : @rule['actions']
+      @log_kind = phase == :until ? 'until' : 'run'
 
       errors, = Validator.new(@rule).validate
       errors << "rule id '#{@rule['id']}' does not match its filename" unless @rule['id'] == rule_id
@@ -78,6 +90,7 @@ module Omaflow
       status = roll_back(snapshot, results:) if status == 'failed'
       record_run(results:, status:, dry_run:)
       print_plan(results) if dry_run
+      puts "would arm: #{@rule_id}" if dry_run && status == 'ok' && @rule['until'].is_a?(Hash)
       status == 'ok' ? 0 : 1
     end
 
@@ -119,13 +132,13 @@ module Omaflow
 
     def log_invalid(errors)
       detail = errors.map { "error: #{it}" }.join("\n")
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'run', 'execId' => @exec_id, 'ruleId' => @rule_id,
+      Store.log_append({ 'at' => Sys.now_iso, 'kind' => @log_kind, 'execId' => @exec_id, 'ruleId' => @rule_id,
                          'status' => 'invalid', 'detail' => detail })
       warn "Rule failed validation:\n#{detail}"
       1
     end
 
-    def action_types = (@rule['actions'] || []).map { it['type'] }
+    def action_types = (@actions || []).map { it['type'] }
 
     def capture_snapshot
       revertible = action_types.select { SNAPSHOTTED.key?(it) }.uniq
@@ -145,7 +158,7 @@ module Omaflow
     end
 
     def snapshot_failed(field)
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'run', 'execId' => @exec_id, 'ruleId' => @rule_id,
+      Store.log_append({ 'at' => Sys.now_iso, 'kind' => @log_kind, 'execId' => @exec_id, 'ruleId' => @rule_id,
                          'status' => 'snapshot-failed', 'detail' => "could not capture current #{field}" })
       Sys.notify('Omaflow rule skipped', "Could not snapshot current #{field} for rollback")
       nil
@@ -217,7 +230,7 @@ module Omaflow
 
     def apply_actions(dry_run:)
       results = []
-      (@rule['actions'] || []).each do |action|
+      (@actions || []).each do |action|
         if dry_run && action['type'] != 'agent'
           results << { 'type' => action['type'], 'plan' => action, 'ok' => true }
           next
@@ -294,15 +307,20 @@ module Omaflow
     end
 
     def record_run(results:, status:, dry_run:)
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => dry_run ? 'dry-run' : 'run', 'execId' => @exec_id,
+      kind = dry_run ? 'dry-run' : @log_kind
+      Store.log_append({ 'at' => Sys.now_iso, 'kind' => kind, 'execId' => @exec_id,
                          'ruleId' => @rule_id, 'ruleName' => rule_name, 'trigger' => @trigger_desc,
                          'status' => status, 'actions' => results })
-      return if dry_run
+      return if dry_run || @phase == :until
 
       cooldowns = Store.read_json(Paths.cooldowns_file, {})
       cooldowns[@rule_id] = { 'lastFiredAt' => Sys.now_iso, 'lastFiredEpoch' => Time.now.to_i }
       Store.write_json(Paths.cooldowns_file, cooldowns)
-      Store.reindex
+      if status == 'ok' && @rule['until'].is_a?(Hash)
+        Store.arm(@rule_id)
+      else
+        Store.reindex
+      end
     end
 
     def print_plan(results)

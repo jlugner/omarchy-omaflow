@@ -30,11 +30,12 @@ module Omaflow
       @weekday = @now.strftime('%a').downcase
       @previous = previous_domains
       @rules = Store.rules
-      @file_trigger_dirs = Store.file_trigger_dirs(@rules).first(WATCH_DIR_LIMIT)
+      @armed_rules = Store.armed
+      @file_trigger_dirs = Store.file_trigger_dirs(@rules, @armed_rules).first(WATCH_DIR_LIMIT)
       @file_keys = @file_trigger_dirs.map { file_probe_key(it) }
-      @git_repos = Store.git_repos(@rules).first(GIT_REPO_LIMIT)
+      @git_repos = Store.git_repos(@rules, @armed_rules).first(GIT_REPO_LIMIT)
       @git_keys = @git_repos.map { git_probe_key(it) }
-      @watched_dirs = Store.watched_dirs(@rules)
+      @watched_dirs = Store.watched_dirs(@rules, @armed_rules)
       sync_watched_dirs
       @probes = probe_domains
       @current = current_domains
@@ -45,7 +46,12 @@ module Omaflow
         custom_events.concat(derive_events)
       end
 
-      custom_events.each { fire_matching_rules(it) }
+      custom_events.each do |event|
+        armed_ids = Store.armed.keys
+        fire_matching_rules(event)
+        fire_until_rules([event], rule_ids: armed_ids, intervals: false)
+      end
+      fire_until_rules([], intervals: true)
     end
 
     private
@@ -361,7 +367,7 @@ module Omaflow
       @rules.each do |rule|
         next unless rule['enabled'] == true
         next unless rule.dig('trigger', 'type') == event['type']
-        next unless trigger_matches?(rule, event)
+        next unless trigger_matches?(rule['trigger'], event, interval_elapsed: interval_elapsed?(rule))
         next unless conditions_pass?(rule)
         next unless cooldown_over?(rule)
 
@@ -372,13 +378,66 @@ module Omaflow
       end
     end
 
+    def fire_until_rules(events, intervals:, rule_ids: nil)
+      load_armed.each do |rule_id, armed|
+        next if rule_ids && !rule_ids.include?(rule_id)
+
+        path = Paths.rule_file(rule_id)
+        unless path && File.exist?(path)
+          Store.disarm(rule_id)
+          next
+        end
+
+        rule = Store.load_json!(path, {})
+        unless rule['until'].is_a?(Hash)
+          Store.disarm(rule_id)
+          next
+        end
+
+        event = matching_until_event(rule['until']['trigger'], armed, events, intervals:)
+        next unless event
+
+        trigger_type = rule.dig('until', 'trigger', 'type')
+        Executor.run_until(rule_id, trigger: "until:#{trigger_type}", trigger_data: event['data'] || {})
+        Store.disarm(rule_id)
+      rescue JSON::ParserError, IOError
+        next
+      rescue StandardError => e
+        Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule_id,
+                           'status' => 'error', 'detail' => "#{e.class}: #{e.message}" })
+      end
+    end
+
+    def load_armed
+      return {} unless File.exist?(Paths.armed_file)
+
+      Store.load_json!(Paths.armed_file, {})
+    rescue StandardError
+      {}
+    end
+
+    def matching_until_event(trigger, armed, events, intervals:)
+      return unless trigger.is_a?(Hash) && armed.is_a?(Hash)
+
+      if trigger['type'] == 'interval'
+        return unless intervals
+
+        elapsed = @now.to_i - armed['armedEpoch'].to_i >= trigger['minutes'].to_i * 60
+        return { 'type' => 'interval', 'data' => {} } if elapsed
+
+        return nil
+      end
+      events.find do |event|
+        event['type'] == trigger['type'] && trigger_matches?(trigger, event, interval_elapsed: false)
+      end
+    end
+
     def trigger_description(event)
       pairs = event['data'].to_a.map { |key, value| "#{key}=#{value}" }.join(' ')
       "#{event['type']} #{pairs} (#{@reason})".squeeze(' ')
     end
 
-    def trigger_matches?(rule, event)
-      trigger = rule['trigger']
+    def trigger_matches?(trigger, event, interval_elapsed:)
       data = event['data'] || {}
       case event['type']
       when 'monitor-connected', 'monitor-disconnected'
@@ -398,7 +457,7 @@ module Omaflow
       when 'git-branch-changed'
         git_trigger_matches?(trigger, data)
       when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
-      when 'interval' then interval_elapsed?(rule)
+      when 'interval' then interval_elapsed
       when 'custom' then data['name'] == trigger['name']
       else true
       end

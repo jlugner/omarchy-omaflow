@@ -17,6 +17,7 @@ module Omaflow
         omaflow describe <id>
         omaflow run <id> [--dry-run]
         omaflow enable <id> | disable <id>
+        omaflow disarm <id>
         omaflow delete <id>
         omaflow revert <exec-id>
         omaflow log [n]
@@ -56,6 +57,7 @@ module Omaflow
       when 'run' then run_command(argv)
       when 'enable' then set_enabled(argv.first, value: true)
       when 'disable' then set_enabled(argv.first, value: false)
+      when 'disarm' then disarm(argv.first)
       when 'delete' then delete(argv.first)
       when 'revert' then Executor.revert(argv.first.to_s)
       when 'log' then show_log(argv.first)
@@ -84,9 +86,15 @@ module Omaflow
     def list
       Store.reindex
       Store.read_json(Paths.index_file, {}).fetch('rules', []).each do |rule|
-        dot = rule['enabled'] ? '●' : '○'
-        last = rule['lastFired'].to_s.empty? ? '' : "  (last: #{rule['lastFired']})"
-        puts "#{dot} #{rule['id']}  [#{rule['triggerSummary']}] → #{rule['actionsSummary']}#{last}"
+        dot = if rule['armed'] then '◉'
+              elsif rule['enabled'] then '●'
+              else '○'
+              end
+        status = []
+        status << 'armed' if rule['armed']
+        status << "last: #{rule['lastFired']}" unless rule['lastFired'].to_s.empty?
+        suffix = status.empty? ? '' : "  (#{status.join('; ')})"
+        puts "#{dot} #{rule['id']}  [#{rule['triggerSummary']}] → #{rule['actionsSummary']}#{suffix}"
       end
       0
     end
@@ -288,6 +296,30 @@ module Omaflow
       Store.reindex
       puts "#{id}: enabled=#{value}"
       0
+    end
+
+    def disarm(id)
+      unless Paths.rule_file(id.to_s)
+        warn 'Invalid rule id'
+        return 2
+      end
+
+      result = false
+      locked = Store.with_lock('.eval.lock', timeout: 10) { result = Store.disarm(id, log: true) }
+      unless locked
+        warn 'Evaluation is busy'
+        return 1
+      end
+      unless result
+        warn "Rule is not armed: #{id}"
+        return 1
+      end
+
+      puts "Disarmed rule: #{id}"
+      0
+    rescue StandardError => e
+      warn "Could not disarm #{id}: #{e.message}"
+      1
     end
 
     def delete(id)

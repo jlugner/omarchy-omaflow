@@ -20,10 +20,11 @@ RuboCop (config in .rubocop.yml, enforced in CI), plus: endless methods for shor
 - Agent-action proposals are untrusted until validated against the sent window context and the rule's `can` list. They fail closed and never expose a shell.
 - The `Evaluator` is a pure state-diff engine under a non-blocking lock. A failed probe keeps the previous domain value; it must never fabricate events.
 - Window diffs larger than the event limit advance the snapshot without emitting window events; arbitrary subsets must never fire during bulk changes.
-- Watched-directory diffs larger than 10 additions advance that directory's snapshot without emitting file events; probes with more than 512 children fail and preserve the prior snapshot, and only the first 8 expanded sorted enabled-rule paths are watched.
-- Git branch probes resolve `.git` directories or one-hop `gitdir:` files, fail and preserve the prior state when HEAD is unreadable, and watch only the first 8 expanded sorted enabled-rule repositories.
+- Watched-directory diffs larger than 10 additions advance that directory's snapshot without emitting file events; probes with more than 512 children fail and preserve the prior snapshot, and only the first 8 expanded sorted paths from enabled opening triggers or armed until triggers are watched.
+- Git branch probes resolve `.git` directories or one-hop `gitdir:` files, fail and preserve the prior state when HEAD is unreadable, and watch only the first 8 expanded sorted repositories from enabled opening triggers, enabled conditions, or armed until triggers.
 - `watched-dirs.json` contains the union of the separately capped 8 file-trigger directories and resolved Git directories, capped at 16, and is rewritten on every reindex; evaluator ticks rewrite it only when that list changes so the shell's inotify process follows enable and disable changes.
 - Runs are serialized by the run lock. Revertible actions are snapshotted first, fail-closed, and rolled back in-lock on failure. Reverts must report irreversible actions honestly; an empty snapshot is never a successful revert.
+- Armed lifecycles live in the `0600` `armed.json` file as `{"<ruleId>": {"armedAt": <ISO timestamp>, "armedEpoch": <integer>}}`. Updates are strict read-modify-writes. Until actions ignore conditions and cooldowns, run once, and disarm even on failure; evaluator ticks silently remove armed ids whose rule vanished or lost its until block.
 - `Store.parse_json`/`read_json` return the fallback unless the parse matches the fallback's type — never pass `nil` as the fallback expecting a parse back.
 
 ## Adding a trigger, condition, or action type

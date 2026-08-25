@@ -59,7 +59,7 @@ omaflow setup [--yes]
 omaflow author "on battery, enable dnd and dim ambitions"
 omaflow stage-file <path> · describe <id>
 omaflow stage show|accept|reject
-omaflow list · run <id> [--dry-run] · enable|disable|delete <id>
+omaflow list · run <id> [--dry-run] · enable|disable|disarm|delete <id>
 omaflow log · revert <exec-id> · agent [codex|claude|grok|auto] · poke
 omaflow trigger <name> [key=value ...]
 omaflow scripts [list | add <name> <absolute-path> [description] | remove <name>]
@@ -85,6 +85,16 @@ omaflow webhooks add phone https://ntfy.sh/your-topic ntfy
 
 Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a default `json` envelope.
 
+### Until
+
+An optional `until` block gives one rule an opening and a closing half. The rule arms only after its opening actions succeed; the matching `until` event later runs the closing actions once and disarms. Conditions and cooldowns gate the opening, never the escape hatch. An interval `until` is a one-shot timeout measured from the latest successful opening fire.
+
+```json
+{"schemaVersion":1,"id":"office-tracking","name":"Office tracking","enabled":true,"trigger":{"type":"wifi-connected","match":{"ssid":"Office"}},"actions":[{"type":"hey-timetrack","mode":"start","category":"Work"}],"until":{"trigger":{"type":"wifi-disconnected"},"actions":[{"type":"hey-timetrack","mode":"stop"}]},"source":"start tracking on office wifi until it disconnects"}
+```
+
+Run `omaflow disarm office-tracking` to cancel an armed lifecycle without running its closing actions.
+
 ### HEY
 
 Install the HEY CLI and sign in once:
@@ -94,18 +104,10 @@ omarchy pkg aur add hey-cli
 hey auth login
 ```
 
-Start tracking when you reach work, file the active track under each branch as it changes, and stop when you leave:
-
-```json
-{"schemaVersion":1,"id":"wifi-start","name":"Start work timer","enabled":true,"trigger":{"type":"wifi-connected","match":{"ssid":"Office"}},"actions":[{"type":"hey-timetrack","mode":"start","category":"Work"}],"source":"start tracking on office wifi"}
-```
+The office lifecycle above starts and stops tracking in one rule. A separate branch rule can file the active track under each branch as it changes:
 
 ```json
 {"schemaVersion":1,"id":"branch-switch","name":"Track current branch","enabled":true,"trigger":{"type":"git-branch-changed","repo":"~/Documents/code/project"},"actions":[{"type":"hey-timetrack","mode":"switch","categoryFromRepo":"~/Documents/code/project"}],"source":"switch time tracking with the current branch"}
-```
-
-```json
-{"schemaVersion":1,"id":"wifi-stop","name":"Stop work timer","enabled":true,"trigger":{"type":"wifi-disconnected"},"actions":[{"type":"hey-timetrack","mode":"stop"}],"source":"stop tracking when wifi disconnects"}
 ```
 
 An 08:00 agenda flow can stay quiet on empty days:

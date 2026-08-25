@@ -3,7 +3,7 @@
 module Omaflow
   class Author
     SCHEMA_DOC = <<~DOC
-      Rule JSON schema (schemaVersion 1). Top-level fields: schemaVersion (1), id (lowercase slug), name (short), enabled (true), trigger, conditions (optional array, max 5), actions (array, max 10), cooldownSeconds (optional, default 60), source (the original user request verbatim).
+      Rule JSON schema (schemaVersion 1). Top-level fields: schemaVersion (1), id (lowercase slug), name (short), enabled (true), trigger, conditions (optional array, max 5), actions (array, max 10), until (optional lifecycle ending block), cooldownSeconds (optional, default 60), source (the original user request verbatim).
       Triggers (exactly one):
         {"type":"manual"}
         {"type":"time","at":"HH:MM","days":["mon".."sun"] (optional)}
@@ -46,6 +46,8 @@ module Omaflow
         {"type":"hey-agenda","title":"<text>" (optional, default Today),"skipWhenEmpty":true|false (optional, default true)} — notifies with today's HEY events
         {"type":"notify","title":"<short>" (optional),"message":"<text>"}
         {"type":"agent","task":"<what to do>","can":["close-window"|"focus-window"|"move-window-to-workspace"|"notify"],"timeoutSeconds":N (optional, default 120)} — runs an agent at trigger time and costs tokens; task max 300, can is non-empty, timeoutSeconds 10..180, and cooldownSeconds at least 60. Grant only the minimum verbs needed.
+      Until (optional): {"trigger":<same trigger schema except manual>,"actions":[<same action schema, 1..10>]} arms only after the rule's opening actions succeed. A later matching event runs these closing actions once and disarms, ignoring the rule's conditions and cooldown. Use it when the request describes one lifecycle such as "when X ... until Y ...". An interval until means a one-shot timeout N minutes after the most recent successful opening fire, not a repeating schedule.
+      Lifecycle example: {"schemaVersion":1,"id":"office-tracking","name":"Office tracking","enabled":true,"trigger":{"type":"wifi-connected","match":{"ssid":"Office"}},"actions":[{"type":"hey-timetrack","mode":"start","category":"Work"}],"until":{"trigger":{"type":"wifi-disconnected"},"actions":[{"type":"hey-timetrack","mode":"stop"}]},"source":"start tracking on office wifi until it disconnects"}
       In notify and webhook messages, hey-timetrack category, and agent tasks {{trigger}} is replaced with a description of the firing event. In notify and webhook messages and hey-timetrack category every event data key is also available as {{key}}, including {{class}}, {{title}}, {{ssid}}, {{name}}, {{path}}, {{repo}}, {{branch}}, {{from}}, {{source}}, {{at}}, and custom event keys. Unknown placeholders become empty strings; agent tasks support only {{trigger}}.
       hey actions talk to the HEY service at trigger time and need hey auth login once
       Constraints: all name/match/message strings must be plain text with no control characters and must not start with "-"; name max 80 chars, messages max 200 (webhook: 400); cooldownSeconds and workspace numbers must be integers; no fields other than the ones shown.

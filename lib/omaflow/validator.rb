@@ -75,6 +75,7 @@ module Omaflow
       check_trigger
       check_conditions
       check_actions
+      check_until
       [errors, warnings]
     end
 
@@ -111,6 +112,7 @@ module Omaflow
       err('enabled must be a boolean') unless [true, false].include?(@rule['enabled'])
       err('trigger must be an object') unless @rule['trigger'].is_a?(Hash)
       err('actions must be a non-empty array (max 10)') unless @rule['actions'].is_a?(Array) && @rule['actions'].size.between?(1, 10)
+      err('until must be an object') if @rule.key?('until') && !@rule['until'].is_a?(Hash)
       conditions = @rule.fetch('conditions', [])
       err('conditions must be an array (max 5)') unless conditions.is_a?(Array) && conditions.size <= 5
       cooldown = @rule.fetch('cooldownSeconds', 60)
@@ -125,31 +127,42 @@ module Omaflow
       trigger = @rule['trigger']
       return unless trigger.is_a?(Hash)
 
+      validate_trigger(trigger, label: '.trigger', manual: true)
+    end
+
+    def validate_trigger(trigger, label:, manual:)
+      @trigger_label = label
+
       type = trigger['type'].to_s
       return err('trigger.type is required') if type.empty?
 
       check = TRIGGER_CHECKS[type]
       return err("unknown trigger type: #{type}") unless check
 
+      err('an until needs an event; to end manually, run omaflow disarm <id>') if type == 'manual' && !manual
       send(check, trigger)
+    ensure
+      @trigger_label = nil
     end
 
-    def check_manual_trigger(trigger) = unknown_keys(trigger, %w[type], '.trigger')
+    def trigger_label = @trigger_label || '.trigger'
+
+    def check_manual_trigger(trigger) = unknown_keys(trigger, %w[type], trigger_label)
 
     def check_time_trigger(trigger)
       err('time trigger needs at: "HH:MM"') unless trigger['at'].is_a?(String) && trigger['at'].match?(HHMM)
       days = trigger.fetch('days', Vocabulary::WEEKDAYS)
       err('time trigger days must be from mon..sun') unless days.is_a?(Array) && !days.empty? && (days - Vocabulary::WEEKDAYS).empty?
-      unknown_keys(trigger, %w[type at days], '.trigger')
+      unknown_keys(trigger, %w[type at days], trigger_label)
     end
 
     def check_interval_trigger(trigger)
       err('interval trigger needs minutes as an integer 1..1440') unless integer_between?(trigger['minutes'], 1..1440)
-      unknown_keys(trigger, %w[type minutes], '.trigger')
+      unknown_keys(trigger, %w[type minutes], trigger_label)
     end
 
     def check_lid_trigger(trigger)
-      unknown_keys(trigger, %w[type], '.trigger')
+      unknown_keys(trigger, %w[type], trigger_label)
       warn_lid_unavailable
     end
 
@@ -157,16 +170,16 @@ module Omaflow
       match = trigger['match']
       valid = present_match?(match, %w[description name])
       err("#{trigger['type']} needs match.description or match.name as a plain string") unless valid
-      unknown_keys(trigger, %w[type match], '.trigger')
-      unknown_keys(match, %w[description name], '.trigger.match') if match.is_a?(Hash)
+      unknown_keys(trigger, %w[type match], trigger_label)
+      unknown_keys(match, %w[description name], "#{trigger_label}.match") if match.is_a?(Hash)
     end
 
     def check_app_trigger(trigger)
       match = trigger['match']
       valid = present_match?(match, %w[class title])
       err("#{trigger['type']} needs match.class or match.title as a plain string") unless valid
-      unknown_keys(trigger, %w[type match], '.trigger')
-      unknown_keys(match, %w[class title], '.trigger.match') if match.is_a?(Hash)
+      unknown_keys(trigger, %w[type match], trigger_label)
+      unknown_keys(match, %w[class title], "#{trigger_label}.match") if match.is_a?(Hash)
     end
 
     def check_wifi_connected_trigger(trigger)
@@ -174,15 +187,15 @@ module Omaflow
       valid = match.is_a?(Hash) && (match['ssid'] == '*' || safe_str?(match['ssid']) || match['known'] == false)
       valid &&= match['ssid'] == '*' || safe_str?(match['ssid']) if match.is_a?(Hash) && match.key?('ssid')
       err('wifi-connected needs match.ssid ("*" for any) or match.known: false') unless valid
-      unknown_keys(trigger, %w[type match], '.trigger')
-      unknown_keys(match, %w[ssid known], '.trigger.match') if match.is_a?(Hash)
+      unknown_keys(trigger, %w[type match], trigger_label)
+      unknown_keys(match, %w[ssid known], "#{trigger_label}.match") if match.is_a?(Hash)
     end
 
-    def check_wifi_disconnected_trigger(trigger) = unknown_keys(trigger, %w[type], '.trigger')
+    def check_wifi_disconnected_trigger(trigger) = unknown_keys(trigger, %w[type], trigger_label)
 
     def check_power_trigger(trigger)
       err('power-source needs source: ac|battery') unless %w[ac battery].include?(trigger['source'])
-      unknown_keys(trigger, %w[type source], '.trigger')
+      unknown_keys(trigger, %w[type source], trigger_label)
     end
 
     def check_file_trigger(trigger)
@@ -191,8 +204,8 @@ module Omaflow
       match = trigger['match']
       err("#{trigger['type']} match must be an object with an optional plain-string name") if
         !match.nil? && (!match.is_a?(Hash) || (match.key?('name') && !present_str?(match['name'])))
-      unknown_keys(trigger, %w[type path match], '.trigger')
-      unknown_keys(match, %w[name], '.trigger.match') if match.is_a?(Hash)
+      unknown_keys(trigger, %w[type path match], trigger_label)
+      unknown_keys(match, %w[name], "#{trigger_label}.match") if match.is_a?(Hash)
     end
 
     def check_git_trigger(trigger)
@@ -201,8 +214,8 @@ module Omaflow
       match = trigger['match']
       err('git-branch-changed match must be an object with an optional plain-string branch') if
         !match.nil? && (!match.is_a?(Hash) || (match.key?('branch') && !present_str?(match['branch'])))
-      unknown_keys(trigger, %w[type repo match], '.trigger')
-      unknown_keys(match, %w[branch], '.trigger.match') if match.is_a?(Hash)
+      unknown_keys(trigger, %w[type repo match], trigger_label)
+      unknown_keys(match, %w[branch], "#{trigger_label}.match") if match.is_a?(Hash)
     end
 
     def valid_path?(path)
@@ -211,7 +224,7 @@ module Omaflow
 
     def check_custom_trigger(trigger)
       err('custom trigger needs name as a lowercase slug') unless trigger['name'].is_a?(String) && trigger['name'].match?(SLUG)
-      unknown_keys(trigger, %w[type name], '.trigger')
+      unknown_keys(trigger, %w[type name], trigger_label)
     end
 
     def check_conditions
@@ -298,6 +311,23 @@ module Omaflow
       actions = @rule.fetch('actions', [])
       return unless actions.is_a?(Array)
 
+      check_action_list(actions)
+    end
+
+    def check_until
+      until_block = @rule['until']
+      return unless until_block.is_a?(Hash)
+
+      unknown_keys(until_block, %w[trigger actions], '.until')
+      trigger = until_block['trigger']
+      actions = until_block['actions']
+      err('until.trigger must be an object') unless trigger.is_a?(Hash)
+      err('until.actions must be a non-empty array (max 10)') unless actions.is_a?(Array) && actions.size.between?(1, 10)
+      validate_trigger(trigger, label: '.until.trigger', manual: false) if trigger.is_a?(Hash)
+      check_action_list(actions) if actions.is_a?(Array)
+    end
+
+    def check_action_list(actions)
       actions.each do |action|
         type = action.is_a?(Hash) ? action['type'].to_s : ''
         next err('action missing type') if type.empty?
