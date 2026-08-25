@@ -50,6 +50,29 @@ Item {
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
   readonly property color accentColor: Color.accent
+  property var themePalette: ({})
+
+  function loadPalette(raw) {
+    var palette = {}
+    var lines = String(raw || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var match = lines[i].match(/^\s*([A-Za-z0-9_]+)\s*=\s*["']?(#[0-9A-Fa-f]{6})/)
+      if (match) palette[match[1]] = match[2]
+    }
+    root.themePalette = palette
+  }
+
+  function themeHue(names, fallback) {
+    for (var i = 0; i < names.length; i++)
+      if (root.themePalette[names[i]]) return root.themePalette[names[i]]
+    return fallback
+  }
+
+  readonly property color flowTrigger: themeHue(["blue", "bright_blue", "color4"], accentColor)
+  readonly property color flowCondition: themeHue(["yellow", "bright_yellow", "color3"], accentColor)
+  readonly property color flowAction: themeHue(["magenta", "bright_magenta", "color5"], accentColor)
+  readonly property color flowLine: themeHue(["green", "bright_green", "color2"], accentColor)
+
   readonly property color editorHairline: Qt.alpha(foreground, 0.16)
   readonly property color editorInkMuted: Qt.alpha(foreground, 0.55)
   readonly property color editorLine: Qt.alpha(foreground, 0.3)
@@ -75,6 +98,10 @@ Item {
   }
 
   property var pickerReturn: null
+  readonly property color pickerTint: pickerTarget === null ? accentColor
+    : pickerTarget.kind === "trigger" ? flowTrigger
+    : pickerTarget.kind === "condition" ? flowCondition
+    : flowAction
 
   function openTypePicker(kind, index, origin) {
     root.pickerQuery = ""
@@ -531,6 +558,7 @@ Item {
     property bool strong: false
     property bool ghost: false
     property bool accented: false
+    property color tintColor: root.accentColor
     property bool tabFocus: true
     signal clicked()
 
@@ -539,12 +567,12 @@ Item {
     implicitHeight: Math.max(Style.space(30), buttonLabel.implicitHeight + Style.spacing.sm)
     radius: height / 2
     color: strong ? root.accentColor
-      : ghost && accented ? (activeFocus || buttonMouse.containsMouse ? Qt.alpha(root.accentColor, 0.12) : "transparent")
+      : ghost && accented ? (activeFocus || buttonMouse.containsMouse ? Qt.alpha(tintColor, 0.12) : "transparent")
       : ghost ? (activeFocus || buttonMouse.containsMouse ? Qt.alpha(root.foreground, 0.08) : "transparent")
       : Style.controlFill(activeFocus, buttonMouse.containsMouse, root.foreground, root.accentColor)
     border.width: strong ? 0 : 1
     border.color: activeFocus ? Qt.alpha(root.accentColor, 0.9)
-      : ghost && accented ? Qt.alpha(root.accentColor, 0.35)
+      : ghost && accented ? Qt.alpha(tintColor, 0.4)
       : ghost ? (buttonMouse.containsMouse ? root.editorHairline : "transparent")
       : root.editorHairline
 
@@ -554,7 +582,7 @@ Item {
       text: editorButton.label
       textFormat: Text.PlainText
       color: editorButton.strong ? (root.accentColor.hslLightness > 0.55 ? Qt.rgba(0, 0, 0, 0.85) : "#ffffff")
-        : editorButton.accented ? Qt.alpha(root.accentColor, editorButton.activeFocus || buttonMouse.containsMouse ? 1 : 0.85)
+        : editorButton.accented ? Qt.alpha(editorButton.tintColor, editorButton.activeFocus || buttonMouse.containsMouse ? 1 : 0.9)
         : editorButton.ghost && !(editorButton.activeFocus || buttonMouse.containsMouse) ? root.editorInkMuted
         : root.foreground
       font.family: Style.font.menuFamily
@@ -688,9 +716,9 @@ Item {
     width: parent.width
     height: cardInner.implicitHeight + Style.spacing.md * 2
     radius: root.cornerRadius
-    color: focusedNode ? Qt.alpha(root.foreground, 0.07) : Qt.alpha(root.foreground, 0.04)
+    color: focusedNode ? Qt.alpha(rail, 0.1) : Qt.alpha(rail, 0.05)
     border.width: 1
-    border.color: focusedNode ? Qt.alpha(root.accentColor, 0.8) : root.editorHairline
+    border.color: focusedNode ? Qt.alpha(rail, 0.85) : root.editorHairline
 
     Rectangle {
       anchors.left: parent.left
@@ -720,6 +748,7 @@ Item {
     id: connectorItem
     property bool arrow: false
     property string label: ""
+    property color tint: root.flowLine
 
     width: parent.width
     implicitHeight: Style.space(label !== "" ? 32 : arrow ? 26 : 20)
@@ -730,7 +759,7 @@ Item {
       anchors.bottom: parent.bottom
       anchors.bottomMargin: connectorItem.arrow ? Style.space(7) : 0
       width: 1
-      color: Qt.alpha(root.accentColor, 0.4)
+      color: Qt.alpha(root.flowLine, 0.55)
     }
 
     Text {
@@ -740,7 +769,7 @@ Item {
       anchors.bottomMargin: -Style.space(2)
       text: "▾"
       textFormat: Text.PlainText
-      color: Qt.alpha(root.accentColor, 0.65)
+      color: Qt.alpha(root.flowLine, 0.9)
       font.family: Style.font.menuFamily
       font.pixelSize: Math.round(Style.font.caption * 0.9)
     }
@@ -753,7 +782,7 @@ Item {
       radius: height / 2
       color: root.background
       border.width: 1
-      border.color: Qt.alpha(root.accentColor, 0.45)
+      border.color: Qt.alpha(connectorItem.tint, 0.55)
 
       Text {
         id: connectorLabel
@@ -761,7 +790,7 @@ Item {
         anchors.horizontalCenterOffset: 1
         text: connectorItem.label
         textFormat: Text.PlainText
-        color: Qt.alpha(root.accentColor, 0.9)
+        color: connectorItem.tint
         font.family: Style.font.menuFamily
         font.pixelSize: Math.round(Style.font.caption * 0.8)
         font.weight: Font.Bold
@@ -989,6 +1018,16 @@ Item {
         root.staging = { status: "error", error: "Could not load the selected rule" }
       }
     }
+  }
+
+  FileView {
+    id: themeColorsFile
+    path: root.stateHome + "/omarchy/current/theme/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.loadPalette(text())
+    onFileChanged: reload()
+    onLoadFailed: root.loadPalette("")
   }
 
   FileView {
@@ -1221,7 +1260,7 @@ Item {
               NodeCard {
                 id: triggerCard
                 focusedNode: triggerNode.activeFocus
-                rail: root.accentColor
+                rail: root.flowTrigger
 
                 Row {
                   width: parent.width
@@ -1231,7 +1270,7 @@ Item {
                     id: whenBadge
                     anchors.top: parent.top
                     label: "WHEN"
-                    tint: root.accentColor
+                    tint: root.flowTrigger
                   }
 
                   TypeSelector {
@@ -1476,7 +1515,7 @@ Item {
                   NodeCard {
                     id: conditionCard
                     focusedNode: conditionNode.activeFocus
-                    rail: root.accentColor
+                    rail: root.flowCondition
 
                     Row {
                       width: parent.width
@@ -1486,7 +1525,7 @@ Item {
                         id: ifBadge
                         anchors.top: parent.top
                         label: "ONLY IF"
-                        tint: root.accentColor
+                        tint: root.flowCondition
                         filled: false
                       }
 
@@ -1610,6 +1649,7 @@ Item {
 
                 Connector {
                   label: conditionDelegate.index < editorConditions.count - 1 ? "AND" : ""
+                  tint: root.flowCondition
                 }
               }
             }
@@ -1624,6 +1664,7 @@ Item {
                 label: editorConditions.count >= 5 ? "5 conditions maximum" : "＋ only if…"
                 ghost: true
                 accented: true
+                tintColor: root.flowCondition
                 enabled: editorConditions.count < 5
                 opacity: enabled ? 1 : 0.4
                 onClicked: if (enabled) editorConditions.append(root.defaultCondition("time-between"))
@@ -1654,7 +1695,7 @@ Item {
                   NodeCard {
                     id: actionCard
                     focusedNode: actionNode.activeFocus
-                    rail: root.foreground
+                    rail: root.flowAction
 
                     Row {
                       width: parent.width
@@ -1664,7 +1705,7 @@ Item {
                         id: doBadge
                         anchors.top: parent.top
                         label: "DO " + (actionDelegate.index + 1)
-                        tint: root.foreground
+                        tint: root.flowAction
                       }
 
                       TypeSelector {
@@ -1855,6 +1896,7 @@ Item {
                 label: editorActions.count >= 10 ? "10 actions maximum" : "＋ do…"
                 ghost: true
                 accented: true
+                tintColor: root.flowAction
                 enabled: editorActions.count < 10
                 opacity: enabled ? 1 : 0.4
                 onClicked: if (enabled) editorActions.append(root.defaultAction("notify"))
@@ -1938,7 +1980,7 @@ Item {
             radius: root.cornerRadius
             color: root.background
             border.width: 1
-            border.color: Qt.alpha(root.accentColor, 0.6)
+            border.color: Qt.alpha(root.pickerTint, 0.65)
 
             MouseArea { anchors.fill: parent; onClicked: {} }
 
@@ -1954,7 +1996,7 @@ Item {
               radius: Style.space(6)
               color: Qt.alpha(root.foreground, 0.05)
               border.width: 1
-              border.color: pickerInput.activeFocus ? Qt.alpha(root.accentColor, 0.9) : root.editorHairline
+              border.color: pickerInput.activeFocus ? Qt.alpha(root.pickerTint, 0.9) : root.editorHairline
 
               Text {
                 anchors.left: parent.left
@@ -2035,7 +2077,7 @@ Item {
                 Rectangle {
                   anchors.fill: parent
                   radius: Style.space(6)
-                  color: pickerRow.index === root.pickerIndex ? Qt.alpha(root.accentColor, 0.12) : "transparent"
+                  color: pickerRow.index === root.pickerIndex ? Qt.alpha(root.pickerTint, 0.12) : "transparent"
                 }
 
                 Rectangle {
@@ -2048,7 +2090,7 @@ Item {
                   anchors.leftMargin: Style.space(4)
                   width: Style.space(2)
                   radius: 1
-                  color: root.accentColor
+                  color: root.pickerTint
                 }
 
                 Column {
@@ -2062,7 +2104,7 @@ Item {
                     width: parent.width
                     text: root.prettyType(pickerRow.modelData.type)
                     textFormat: Text.PlainText
-                    color: pickerRow.index === root.pickerIndex ? root.accentColor : root.foreground
+                    color: pickerRow.index === root.pickerIndex ? root.pickerTint : root.foreground
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
                     font.weight: Font.DemiBold
