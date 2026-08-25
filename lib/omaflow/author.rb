@@ -7,7 +7,7 @@ module Omaflow
       Triggers (exactly one):
         {"type":"manual"}
         {"type":"time","at":"HH:MM","days":["mon".."sun"] (optional)}
-        {"type":"interval","minutes":N} — fires roughly every N minutes (1..1440, integer). Combine with conditions to scope where it applies; omit cooldownSeconds, the interval is the spacing.
+        {"type":"interval","minutes":N} — fires roughly every N minutes (1..1440, integer); omit cooldownSeconds, the interval is the spacing. Use ONLY for genuinely periodic work (reminders, recurring checks). NEVER use interval to poll for a state change that an event trigger covers: connecting to wifi is wifi-connected, a branch switch is git-branch-changed, a new file is file-created, an app appearing is app-opened. When the request says "when X happens", pick the trigger that fires on X itself.
         {"type":"lid-opened"}
         {"type":"lid-closed"}
         {"type":"monitor-connected","match":{"description":"<substring>"}} (or match.name)

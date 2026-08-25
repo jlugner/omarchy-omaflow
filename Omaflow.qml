@@ -547,6 +547,11 @@ Item {
       if (action.endpoint) atext += " → " + action.endpoint  // webhook: show WHERE it sends
       if (action.title) atext += " → [" + action.title + "]"
       if (action.message) atext += " \"" + action.message + "\""
+      if (action.mode) atext += " → " + action.mode
+      if (action.category) atext += " (file under: " + action.category + ")"
+      if (action.categoryFromRepo) atext += " (file under current branch of " + action.categoryFromRepo + ")"
+      if (action.skipWhenEmpty === false) atext += " (notify even when empty)"
+      if (action.atLeast) atext += " ≥ " + action.atLeast
       if (action.task) atext += " → " + action.task
       if (action.can) atext += " [can: " + action.can.join(", ") + "]"
       lines.push((a === 0 ? "Do     " : "       ") + atext)
