@@ -95,6 +95,73 @@ grep -q "error: workspace needs an integer" "$test_root/evil.out"
 grep -q "error: cooldownSeconds must be an integer" "$test_root/evil.out"
 grep -q "error: unknown field in .trigger" "$test_root/evil.out"
 
+file_good="$test_root/file-good.json"
+cat >"$file_good" <<'EOF'
+{
+  "schemaVersion": 1, "id": "file-good", "name": "File good", "enabled": true,
+  "trigger": {"type": "file-created", "path": "~/Downloads", "match": {"name": ".pdf"}},
+  "actions": [{"type": "notify", "message": "{{name}} at {{path}}"}], "source": "test"
+}
+EOF
+out=$(validate "$file_good")
+! grep -q "^error:" <<<"$out"
+
+file_missing="$test_root/file-missing.json"
+cat >"$file_missing" <<'EOF'
+{
+  "schemaVersion": 1, "id": "file-missing", "name": "File missing", "enabled": true,
+  "trigger": {"type": "folder-created"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$file_missing" >"$test_root/file-missing.out"; then
+  echo "file trigger without a path unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: folder-created needs path" "$test_root/file-missing.out"
+
+file_relative="$test_root/file-relative.json"
+cat >"$file_relative" <<'EOF'
+{
+  "schemaVersion": 1, "id": "file-relative", "name": "File relative", "enabled": true,
+  "trigger": {"type": "file-created", "path": "Downloads"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$file_relative" >"$test_root/file-relative.out"; then
+  echo "relative file trigger path unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: file-created needs path" "$test_root/file-relative.out"
+
+file_parent="$test_root/file-parent.json"
+cat >"$file_parent" <<'EOF'
+{
+  "schemaVersion": 1, "id": "file-parent", "name": "File parent", "enabled": true,
+  "trigger": {"type": "file-created", "path": "~/Downloads/../Secrets"},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$file_parent" >"$test_root/file-parent.out"; then
+  echo "parent-segment file trigger path unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: file-created needs path" "$test_root/file-parent.out"
+
+file_unknown_match="$test_root/file-unknown-match.json"
+cat >"$file_unknown_match" <<'EOF'
+{
+  "schemaVersion": 1, "id": "file-unknown-match", "name": "File unknown match", "enabled": true,
+  "trigger": {"type": "folder-created", "path": "/tmp", "match": {"name": "work", "kind": "dir"}},
+  "actions": [{"type": "notify", "message": "x"}], "source": "test"
+}
+EOF
+if validate "$file_unknown_match" >"$test_root/file-unknown-match.out"; then
+  echo "unknown file match field unexpectedly validated" >&2
+  exit 1
+fi
+grep -q "error: unknown field in .trigger.match: kind" "$test_root/file-unknown-match.out"
+
 custom_missing="$test_root/custom-missing.json"
 cat >"$custom_missing" <<'EOF'
 {

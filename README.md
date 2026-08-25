@@ -68,7 +68,7 @@ omaflow webhooks [add <name> <url> [format] | remove <name>]
 
 ## What rules can do
 
-**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · app opened/closed · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · named custom events.
+**Triggers:** manual · time of day (+ weekdays) · every N minutes · lid opened/closed · monitor connected/disconnected · app opened/closed · wifi connected (by name, any, or never seen before) / disconnected · switched to AC/battery · file or folder appears in a watched directory · named custom events.
 
 **Conditions:** time window · weekday · on AC/battery · lid open/closed · monitor present · app running · on a given wifi.
 
@@ -88,6 +88,8 @@ Formats shape the body per target: `slack`, `discord`, `ntfy`, `raw`, or a defau
 Fire a custom event with `omaflow trigger deploy-done env=prod`. Notify and webhook messages can use `{{trigger}}` plus event fields such as `{{class}}`, `{{title}}`, `{{env}}`, `{{ssid}}`, `{{name}}`, `{{source}}`, and `{{at}}`. Unknown placeholders become empty strings.
 
 For example, opening Slack can enable DND, or closing Zoom can send a notification.
+
+File and folder rules react instantly through inotify when available, with the 45-second heartbeat as a fallback. Dot-files are skipped; browser partial downloads are best filtered with `match.name`, such as `.pdf`.
 
 There is no shell action, on purpose. The agent can only emit typed, allowlisted actions, and every rule is validated against your actual machine (the theme exists, the app is installed) at install time and again before every run.
 

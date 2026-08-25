@@ -8,6 +8,7 @@ module Omaflow
 
     MAX_JSON_BYTES = 262_144
     MAX_RULE_FILES = 200
+    WATCH_DIR_LIMIT = 8
 
     def safe_read(path, max_bytes: MAX_JSON_BYTES)
       File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
@@ -120,8 +121,23 @@ module Omaflow
 
     def reindex
       cooldowns = read_json(Paths.cooldowns_file, {})
-      indexed = rules.map { index_entry(it, cooldowns) }
-      write_json(Paths.index_file, { 'generatedAt' => Sys.now_iso, 'rules' => indexed.sort_by { it['name'].to_s } })
+      loaded_rules = rules
+      generated_at = Sys.now_iso
+      indexed = loaded_rules.map { index_entry(it, cooldowns) }
+      write_json(Paths.index_file, { 'generatedAt' => generated_at, 'rules' => indexed.sort_by { it['name'].to_s } })
+      write_json(Paths.watched_dirs_file, { 'generatedAt' => generated_at, 'dirs' => watched_dirs(loaded_rules) })
+    end
+
+    def watched_dirs(loaded_rules)
+      loaded_rules.filter_map do |rule|
+        trigger = rule['trigger']
+        next unless rule['enabled'] == true && trigger.is_a?(Hash)
+        next unless %w[file-created folder-created].include?(trigger['type']) && trigger['path'].is_a?(String)
+
+        File.expand_path(trigger['path'])
+      rescue StandardError
+        nil
+      end.sort.uniq.first(WATCH_DIR_LIMIT)
     end
 
     def index_entry(rule, cooldowns)
@@ -147,6 +163,7 @@ module Omaflow
         if match['description'] then ": #{match['description']}"
         elsif match['class'] then ": #{match['class']}"
         elsif match['title'] then ": #{match['title']}"
+        elsif trigger['path'] then ": #{trigger['path']}"
         elsif match['name'] then ": #{match['name']}"
         elsif match['ssid'] then ": #{match['ssid']}"
         elsif match['known'] == false then ': unknown network'

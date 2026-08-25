@@ -9,6 +9,9 @@ module Omaflow
     MONITOR_LIMIT = 16
     WINDOW_LIMIT = 100
     WINDOW_EVENT_LIMIT = 10
+    WATCH_DIR_LIMIT = Store::WATCH_DIR_LIMIT
+    FILE_ENTRY_LIMIT = 512
+    FILE_EVENT_LIMIT = 10
 
     def self.tick(reason = 'tick')
       Store.with_lock('.eval.lock', wait: false) { new(reason).tick }
@@ -25,8 +28,12 @@ module Omaflow
       @minute = @now.strftime('%H:%M')
       @weekday = @now.strftime('%a').downcase
       @previous = previous_domains
+      @rules = Store.rules
+      @watched_dirs = Store.watched_dirs(@rules).first(WATCH_DIR_LIMIT)
+      @watched_keys = @watched_dirs.map { file_probe_key(it) }
+      sync_watched_dirs
       @probes = probe_domains
-      @current = (@previous || {}).merge(@probes)
+      @current = current_domains
       Store.write_json(Paths.domains_file, @current)
       if @previous.nil?
         baseline
@@ -108,6 +115,10 @@ module Omaflow
       probes['monitors'] = monitors if monitors
       windows = probe_windows
       probes['windows'] = windows if windows
+      @watched_dirs.each do |path|
+        files = probe_directory(path)
+        probes[file_probe_key(path)] = files if files
+      end
       ssid = probe_ssid
       probes['ssid'] = ssid if ssid
       on_ac = probe_on_ac
@@ -150,6 +161,45 @@ module Omaflow
     end
 
     def clean_probe_string(value) = value.gsub(/[[:cntrl:]]/, '')[0, 120]
+
+    def probe_directory(path)
+      entries = []
+      count = 0
+      Dir.each_child(path) do |name|
+        count += 1
+        return nil if count > FILE_ENTRY_LIMIT
+        next if name.start_with?('.')
+
+        entries << directory_entry(path, name)
+      end
+      entries.sort_by { [it['name'], it['dir'] ? 0 : 1] }
+    rescue StandardError
+      nil
+    end
+
+    def clean_file_name(value) = value.scrub.gsub(/[[:cntrl:]]/, '')[0, 200]
+
+    def directory_entry(path, name)
+      { 'name' => clean_file_name(name), 'dir' => File.lstat(File.join(path, name)).directory? }
+    rescue StandardError
+      { 'name' => clean_file_name(name), 'dir' => false }
+    end
+
+    def file_probe_key(path) = "files:#{path}"
+
+    def current_domains
+      previous = (@previous || {}).reject do |key, _value|
+        key.start_with?('files:') && !@watched_keys.include?(key)
+      end
+      previous.merge(@probes)
+    end
+
+    def sync_watched_dirs
+      previous = Store.read_json(Paths.watched_dirs_file, {})
+      return if previous['dirs'] == @watched_dirs
+
+      Store.write_json(Paths.watched_dirs_file, { 'generatedAt' => Sys.now_iso, 'dirs' => @watched_dirs })
+    end
 
     def probe_ssid
       output, ok = Sys.capture('nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi')
@@ -201,7 +251,7 @@ module Omaflow
     def domain_fresh?(key) = @previous.key?(key) && @probes.key?(key)
 
     def derive_events
-      [*monitor_events, *window_events, *wifi_events, *power_events, *lid_events, *time_events]
+      [*monitor_events, *window_events, *file_events, *wifi_events, *power_events, *lid_events, *time_events]
     end
 
     def monitor_events
@@ -228,6 +278,22 @@ module Omaflow
     end
 
     def window_event_data(window) = { 'class' => window['class'], 'title' => window['title'] }
+
+    def file_events
+      @watched_dirs.flat_map do |path|
+        key = file_probe_key(path)
+        next [] unless domain_fresh?(key)
+
+        previous_names = @previous[key].map { it['name'] }
+        added = @current[key].reject { previous_names.include?(it['name']) }
+        next [] if added.size > FILE_EVENT_LIMIT
+
+        added.map do |entry|
+          type = entry['dir'] ? 'folder-created' : 'file-created'
+          { 'type' => type, 'data' => { 'name' => entry['name'], 'path' => path } }
+        end
+      end
+    end
 
     def wifi_events
       return [] unless domain_fresh?('ssid')
@@ -269,7 +335,7 @@ module Omaflow
     end
 
     def fire_matching_rules(event)
-      Store.rules.each do |rule|
+      @rules.each do |rule|
         next unless rule['enabled'] == true
         next unless rule.dig('trigger', 'type') == event['type']
         next unless trigger_matches?(rule, event)
@@ -304,11 +370,22 @@ module Omaflow
         else data['ssid'].to_s.downcase.include?(match['ssid'].to_s.downcase)
         end
       when 'power-source' then data['source'] == trigger['source']
+      when 'file-created', 'folder-created'
+        file_trigger_matches?(trigger, data)
       when 'time' then data['at'] == trigger['at'] && trigger_days(trigger).include?(@weekday)
       when 'interval' then interval_elapsed?(rule)
       when 'custom' then data['name'] == trigger['name']
       else true
       end
+    end
+
+    def file_trigger_matches?(trigger, data)
+      return false unless data['path'] == File.expand_path(trigger['path'])
+
+      name = trigger.dig('match', 'name')
+      name.nil? || data['name'].to_s.downcase.include?(name.downcase)
+    rescue StandardError
+      false
     end
 
     def interval_elapsed?(rule)

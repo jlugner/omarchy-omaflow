@@ -26,7 +26,7 @@ Item {
   property bool editorEnabled: true
   property var editorTrigger: ({ type: "manual" })
 
-  readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "custom"]
+  readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "custom"]
   readonly property var conditionTypes: ["time-between", "weekday", "on-power", "lid-state", "monitor-present", "app-running", "on-ssid"]
   readonly property var actionTypes: ["theme", "dnd", "nightlight", "stay-awake", "launch", "workspace", "audio-output", "script", "webhook", "notify", "agent"]
   readonly property var weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -53,7 +53,7 @@ Item {
   readonly property color editorHairline: Qt.alpha(foreground, 0.16)
   readonly property color editorInkMuted: Qt.alpha(foreground, 0.55)
   readonly property color editorLine: Qt.alpha(foreground, 0.3)
-  readonly property var triggerCaptions: ({ "manual": "runs only when you run it", "time": "at a time of day", "interval": "on a repeating timer", "lid-opened": "when the laptop lid opens", "lid-closed": "when the laptop lid closes", "monitor-connected": "when a monitor is plugged in", "monitor-disconnected": "when a monitor is removed", "app-opened": "when a matching window appears", "app-closed": "when a matching window closes", "wifi-connected": "when wifi connects", "wifi-disconnected": "when wifi drops", "power-source": "when the power source changes", "custom": "when you fire this named event" })
+  readonly property var triggerCaptions: ({ "manual": "runs only when you run it", "time": "at a time of day", "interval": "on a repeating timer", "lid-opened": "when the laptop lid opens", "lid-closed": "when the laptop lid closes", "monitor-connected": "when a monitor is plugged in", "monitor-disconnected": "when a monitor is removed", "app-opened": "when a matching window appears", "app-closed": "when a matching window closes", "wifi-connected": "when wifi connects", "wifi-disconnected": "when wifi drops", "power-source": "when the power source changes", "file-created": "when a file lands in a watched folder", "folder-created": "when a folder appears in a watched folder", "custom": "when you fire this named event" })
   readonly property var conditionCaptions: ({ "time-between": "only inside a time window", "weekday": "only on chosen weekdays", "on-power": "only on AC or battery", "lid-state": "only with the lid open or closed", "monitor-present": "only if a monitor is present", "app-running": "only if a matching window exists", "on-ssid": "only on a given wifi" })
   readonly property var actionCaptions: ({ "theme": "switch the desktop theme", "dnd": "toggle do-not-disturb", "nightlight": "toggle the night filter", "stay-awake": "keep the machine awake", "launch": "open an app", "workspace": "jump to a workspace", "audio-output": "route sound to a sink", "script": "run one allowed script", "webhook": "post to a named endpoint", "notify": "show a notification", "agent": "ask the agent to act, inside limits" })
   function prettyType(value) { return String(value).split("-").join(" ") }
@@ -167,6 +167,7 @@ Item {
     if (type === "app-opened" || type === "app-closed") return { type: type, match: { class: "" } }
     if (type === "wifi-connected") return { type: type, match: { ssid: "*" } }
     if (type === "power-source") return { type: type, source: "ac" }
+    if (type === "file-created" || type === "folder-created") return { type: type, path: "~/Downloads" }
     if (type === "custom") return { type: type, name: "" }
     return { type: type }
   }
@@ -460,6 +461,7 @@ Item {
       if (t.match.known === false) when += ": a network never seen before"
     }
     if (t.name) when += ": " + t.name
+    if (t.path) when += ": " + t.path
     if (t.source) when += ": " + t.source
     lines.push("When   " + when)
     var conds = rule.conditions || []
@@ -1377,6 +1379,53 @@ Item {
                         var trigger = root.clone(root.editorTrigger)
                         if (String((trigger.match || {}).title || "") === text) return
                         trigger.match = { title: text }
+                        root.editorTrigger = trigger
+                      }
+                    }
+                  }
+                }
+
+                Column {
+                  width: parent.width
+                  spacing: Style.spacing.sm
+                  visible: root.editorTrigger.type === "file-created" || root.editorTrigger.type === "folder-created"
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.sm
+
+                    FieldLabel { text: "folder" }
+
+                    EditorField {
+                      width: parent.width - Style.space(76) - parent.spacing
+                      text: String(root.editorTrigger.path || "")
+                      placeholder: "~/Downloads"
+                      onTextChanged: {
+                        if (root.editorTrigger.type !== "file-created" && root.editorTrigger.type !== "folder-created") return
+                        if (String(root.editorTrigger.path || "") === text) return
+                        var trigger = root.clone(root.editorTrigger)
+                        trigger.path = text
+                        root.editorTrigger = trigger
+                      }
+                    }
+                  }
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.sm
+
+                    FieldLabel { text: "name" }
+
+                    EditorField {
+                      width: parent.width - Style.space(76) - parent.spacing
+                      text: String((root.editorTrigger.match || {}).name || "")
+                      placeholder: "name filter, e.g. .pdf (optional)"
+                      onTextChanged: {
+                        if (root.editorTrigger.type !== "file-created" && root.editorTrigger.type !== "folder-created") return
+                        if (String((root.editorTrigger.match || {}).name || "") === text) return
+                        var trigger = root.clone(root.editorTrigger)
+                        if (String(text).trim() === "") delete trigger.match
+                        else trigger.match = { name: text }
                         root.editorTrigger = trigger
                       }
                     }

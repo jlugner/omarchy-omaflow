@@ -21,9 +21,29 @@ Item {
   }
   readonly property string evalPath: pluginDir + "bin/omaflow-eval"
   readonly property string omaflowPath: pluginDir + "bin/omaflow"
+  readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state"
 
   property bool evalQueued: false
   property bool firstTick: true
+  property var watchedDirs: []
+
+  function applyWatchedDirs(text) {
+    fileMonitor.running = false
+    var dirs = []
+    try {
+      var payload = JSON.parse(String(text || "{}"))
+      if (Array.isArray(payload.dirs))
+        dirs = payload.dirs.filter(function(path) { return typeof path === "string" && path.length > 0 })
+    } catch (error) {
+      dirs = []
+    }
+    root.watchedDirs = dirs
+    if (dirs.length > 0)
+      Qt.callLater(function() {
+        if (root.watchedDirs.length > 0)
+          fileMonitor.running = true
+      })
+  }
 
   function poke(reason, immediate) {
     // Coalesce bursts: at most one queued eval at a time; the evaluator
@@ -107,6 +127,24 @@ Item {
     interval: 5000
     repeat: false
     onTriggered: networkMonitor.running = true
+  }
+
+  FileView {
+    id: watchedDirsFile
+    path: root.stateHome + "/omaflow/watched-dirs.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyWatchedDirs(text())
+    onFileChanged: reload()
+    onLoadFailed: root.applyWatchedDirs("")
+  }
+
+  Process {
+    id: fileMonitor
+    command: ["inotifywait", "-m", "-q", "-e", "create,moved_to", "--format", "%w"].concat(root.watchedDirs)
+    stdout: SplitParser {
+      onRead: root.poke("files")
+    }
   }
 
   // Guaranteed heartbeat: time triggers + belt-and-braces re-diff.

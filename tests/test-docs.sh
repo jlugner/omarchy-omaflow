@@ -23,6 +23,8 @@ trigger app-closed
 trigger wifi-connected
 trigger wifi-disconnected
 trigger power-source
+trigger file-created
+trigger folder-created
 trigger custom
 condition time-between
 condition weekday
@@ -68,9 +70,15 @@ fi
   abort "monitor-present match.name missing" unless
     doc.include?(%({"type":"monitor-present","match":{"description":"<substring>"}} (or match.name)))
   abort "custom event timestamp missing" unless doc.include?("{{at}} is the envelope timestamp")
+  abort "file trigger template keys missing" unless doc.include?("{{name}} and {{path}} are available")
+  abort "file trigger summary missing path" unless
+    Omaflow::Store.trigger_summary({ "type" => "file-created", "path" => "~/Downloads",
+                                     "match" => { "name" => ".pdf" } }) == "file-created: ~/Downloads"
 '
 
 grep -q 'gdbus.*org.freedesktop.UPower' "$plugin_dir/Service.qml"
+grep -q 'inotifywait.*create,moved_to' "$plugin_dir/Service.qml"
+grep -q 'watched-dirs.json' "$plugin_dir/Service.qml"
 ! grep -q 'name === "switch"' "$plugin_dir/Service.qml"
 
 echo "test-docs: ok"

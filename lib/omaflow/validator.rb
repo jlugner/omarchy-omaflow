@@ -19,6 +19,8 @@ module Omaflow
       'wifi-connected' => :check_wifi_connected_trigger,
       'wifi-disconnected' => :check_wifi_disconnected_trigger,
       'power-source' => :check_power_trigger,
+      'file-created' => :check_file_trigger,
+      'folder-created' => :check_file_trigger,
       'custom' => :check_custom_trigger
     }.freeze
 
@@ -176,6 +178,17 @@ module Omaflow
     def check_power_trigger(trigger)
       err('power-source needs source: ac|battery') unless %w[ac battery].include?(trigger['source'])
       unknown_keys(trigger, %w[type source], '.trigger')
+    end
+
+    def check_file_trigger(trigger)
+      path = trigger['path']
+      valid_path = present_str?(path) && (path.start_with?('~/') || path.start_with?('/')) && !path.split('/').include?('..')
+      err("#{trigger['type']} needs path starting with ~/ or /, at most 200 chars, with no .. segment") unless valid_path
+      match = trigger['match']
+      err("#{trigger['type']} match must be an object with an optional plain-string name") if
+        !match.nil? && (!match.is_a?(Hash) || (match.key?('name') && !present_str?(match['name'])))
+      unknown_keys(trigger, %w[type path match], '.trigger')
+      unknown_keys(match, %w[name], '.trigger.match') if match.is_a?(Hash)
     end
 
     def check_custom_trigger(trigger)

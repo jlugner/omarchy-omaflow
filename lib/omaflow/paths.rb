@@ -20,6 +20,7 @@ module Omaflow
     def index_file = File.join(state_dir, 'index.json')
     def log_file = File.join(state_dir, 'log.jsonl')
     def domains_file = File.join(state_dir, 'domains.json')
+    def watched_dirs_file = File.join(state_dir, 'watched-dirs.json')
     def cooldowns_file = File.join(state_dir, 'cooldowns.json')
     def seen_ssids_file = File.join(state_dir, 'seen-ssids.json')
     def staging_file = File.join(state_dir, 'staging.json')

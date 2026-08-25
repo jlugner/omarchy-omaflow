@@ -617,4 +617,109 @@ run_env "$plugin_dir/bin/omaflow-eval" monitors
 run_env jq -e '.monitors[0].name == "DP-1" and (.monitors[0].description | length) == 120' "$state/domains.json" >/dev/null
 ! grep -Fq '\u001b' "$state/domains.json"
 
+# 18. A watched directory is baselined before a new file fires with name and
+#     path template values.
+watched_dir="$test_root/watched"
+mkdir -p "$watched_dir"
+cat >"$rules_dir/file-created.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "file-created", "name": "File created", "enabled": true,
+  "trigger": {"type": "file-created", "path": "~/watched"},
+  "actions": [{"type": "notify", "message": "file {{name}} at {{path}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+cat >"$rules_dir/folder-created.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "folder-created", "name": "Folder created", "enabled": true,
+  "trigger": {"type": "folder-created", "path": "~/watched"},
+  "actions": [{"type": "notify", "message": "folder {{name}} at {{path}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+run_env "$plugin_dir/bin/omaflow-eval" files
+run_env jq -e --arg dir "$watched_dir" '.dirs == [$dir]' "$state/watched-dirs.json" >/dev/null
+: >"$calls"
+touch "$watched_dir/report.txt"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q "omarchy-notification-send.*file report.txt at $watched_dir" "$calls"
+
+# 19. A newly created directory emits only folder-created.
+: >"$calls"
+mkdir "$watched_dir/project"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q "omarchy-notification-send.*folder project at $watched_dir" "$calls"
+! grep -Fq "omarchy-notification-send file project" "$calls"
+
+# 20. Dot-files never enter the directory snapshot or emit events.
+: >"$calls"
+touch "$watched_dir/.partial"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*partial' "$calls"
+run_env jq -e --arg key "files:$watched_dir" '.[$key] | all(.name != ".partial")' "$state/domains.json" >/dev/null
+
+# 21. A bulk addition advances the snapshot without firing, then a later
+#     single addition fires normally.
+: >"$calls"
+for number in $(seq 1 12); do
+  touch "$watched_dir/bulk-$number"
+done
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*bulk-' "$calls"
+run_env jq -e --arg key "files:$watched_dir" '.[$key] | map(select(.name | startswith("bulk-"))) | length == 12' \
+  "$state/domains.json" >/dev/null
+: >"$calls"
+touch "$watched_dir/after-bulk.txt"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q "omarchy-notification-send.*file after-bulk.txt at $watched_dir" "$calls"
+
+# 22. match.name filters case-insensitively by substring.
+cat >"$rules_dir/pdf-created.json" <<'EOF'
+{
+  "schemaVersion": 1, "id": "pdf-created", "name": "PDF created", "enabled": true,
+  "trigger": {"type": "file-created", "path": "~/watched", "match": {"name": ".pdf"}},
+  "actions": [{"type": "notify", "message": "matched {{name}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+: >"$calls"
+touch "$watched_dir/ignored.txt"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*matched' "$calls"
+: >"$calls"
+touch "$watched_dir/Invoice.PDF"
+run_env "$plugin_dir/bin/omaflow-eval" files
+grep -q 'omarchy-notification-send.*matched Invoice.PDF' "$calls"
+
+# 23. Only the first eight sorted unique enabled-rule paths are watched.
+rm -f "$rules_dir/file-created.json" "$rules_dir/folder-created.json" "$rules_dir/pdf-created.json"
+for number in $(seq 1 9); do
+  mkdir -p "$test_root/limit-$number"
+  cat >"$rules_dir/limit-$number.json" <<EOF
+{
+  "schemaVersion": 1, "id": "limit-$number", "name": "Limit $number", "enabled": true,
+  "trigger": {"type": "file-created", "path": "~/limit-$number"},
+  "actions": [{"type": "notify", "message": "limit-$number {{name}}"}], "cooldownSeconds": 0, "source": "test"
+}
+EOF
+done
+run_env "$plugin_dir/bin/omaflow-eval" files
+run_env jq -e --arg ninth "$test_root/limit-9" '.dirs | length == 8 and index($ninth) == null' \
+  "$state/watched-dirs.json" >/dev/null
+: >"$calls"
+touch "$test_root/limit-9/not-watched.txt"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*limit-9' "$calls"
+run_env jq -e --arg key "files:$test_root/limit-9" 'has($key) | not' "$state/domains.json" >/dev/null
+
+# 24. Exactly 512 children can baseline through bulk suppression; the 513th
+#     makes that directory probe fail and preserves its prior snapshot.
+: >"$calls"
+for number in $(seq 1 512); do
+  touch "$test_root/limit-1/entry-$number"
+done
+run_env "$plugin_dir/bin/omaflow-eval" files
+run_env jq -e --arg key "files:$test_root/limit-1" '.[$key] | length == 512' "$state/domains.json" >/dev/null
+touch "$test_root/limit-1/entry-513"
+run_env "$plugin_dir/bin/omaflow-eval" files
+! grep -q 'omarchy-notification-send.*limit-1' "$calls"
+run_env jq -e --arg key "files:$test_root/limit-1" '.[$key] | length == 512' "$state/domains.json" >/dev/null
+
 echo "test-eval: ok"
