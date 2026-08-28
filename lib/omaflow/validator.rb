@@ -86,6 +86,13 @@ module Omaflow
     def err(message) = errors << message
     def warn(message) = warnings << message
 
+    def warn_missing_repo(repo)
+      return unless valid_path?(repo) && GitState.git_dir(repo).nil?
+
+      message = "no git repository at #{repo} (branch-based rules will fail until it exists)"
+      warn(message) unless warnings.include?(message)
+    end
+
     def safe_str?(value, max: 200)
       value.is_a?(String) && value.length.between?(1, max) &&
         !value.match?(/[[:cntrl:]]/) && !value.start_with?('-')
@@ -218,6 +225,7 @@ module Omaflow
     def check_git_trigger(trigger)
       err('git-branch-changed needs repo starting with ~/ or /, at most 200 chars, with no .. segment') unless
         valid_path?(trigger['repo'])
+      warn_missing_repo(trigger['repo'])
       match = trigger['match']
       err('git-branch-changed match must be an object with an optional plain-string branch') if
         !match.nil? && (!match.is_a?(Hash) || (match.key?('branch') && !present_str?(match['branch'])))
@@ -299,6 +307,7 @@ module Omaflow
     def check_on_branch(condition)
       err('on-branch needs repo starting with ~/ or /, at most 200 chars, with no .. segment') unless
         valid_path?(condition['repo'])
+      warn_missing_repo(condition['repo'])
       err('on-branch needs branch as a plain string') unless present_str?(condition['branch'])
       unknown_keys(condition, %w[type repo branch], 'on-branch condition')
     end
@@ -444,6 +453,7 @@ module Omaflow
       if action.key?('categoryFromRepo') && !valid_path?(action['categoryFromRepo'])
         err('hey-timetrack categoryFromRepo must start with ~/ or /, be at most 200 chars, and contain no .. segment')
       end
+      warn_missing_repo(action['categoryFromRepo'])
       err('hey-timetrack category and categoryFromRepo are mutually exclusive') if
         action.key?('category') && action.key?('categoryFromRepo')
       unknown_keys(action, %w[type mode category categoryFromRepo], 'hey-timetrack action')

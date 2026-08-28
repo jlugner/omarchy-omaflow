@@ -197,6 +197,9 @@ run_env jq -e '."preflight-close".pendingUntil.type == "custom" and ."preflight-
   "$state/armed.json" >/dev/null
 run_env jq -e '.kind == "until" and .ruleId == "preflight-close" and .status == "invalid"' \
   <(grep '"kind":"until".*"ruleId":"preflight-close"' "$state/log.jsonl" | tail -1) >/dev/null
+run_env "$plugin_dir/bin/omaflow-eval" retry-still-missing >/dev/null 2>&1
+run_env jq -e '."preflight-close".pendingUntil.type == "custom"' "$state/armed.json" >/dev/null
+[[ $(grep -c '"kind":"until".*"ruleId":"preflight-close".*"status":"invalid"' "$state/log.jsonl") == 1 ]]
 cat >"$closing_script" <<'EOF'
 #!/bin/bash
 printf 'closing-script\n' >>"$TEST_CALLS"

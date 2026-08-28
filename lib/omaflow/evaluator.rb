@@ -396,7 +396,7 @@ module Omaflow
         end
 
         event = if armed['pendingUntil'].is_a?(Hash)
-                  pending_until_event(rule_id)
+                  pending_until_event(rule_id, armed['pendingUntil'])
                 else
                   matching_until_event(rule['until']['trigger'], armed, events, intervals:)
                 end
@@ -444,11 +444,9 @@ module Omaflow
       end
     end
 
-    def pending_until_event(rule_id)
+    def pending_until_event(rule_id, pending)
       return if @pending_until_attempted[rule_id]
-
-      pending = @armed_rules.dig(rule_id, 'pendingUntil')
-      return unless pending.is_a?(Hash) && pending['type'].is_a?(String) && pending['data'].is_a?(Hash)
+      return unless pending['type'].is_a?(String) && pending['data'].is_a?(Hash)
 
       @pending_until_attempted[rule_id] = true
       { 'type' => pending['type'], 'data' => pending['data'] }

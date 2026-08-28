@@ -88,7 +88,7 @@ module Omaflow
 
       errors, = Validator.new(@rule).validate(phase:)
       errors << "rule id '#{@rule['id']}' does not match its filename" unless @rule['id'] == rule_id
-      return log_invalid(errors) unless errors.empty?
+      return log_invalid(errors, quiet: phase == :until && armed.to_h['pendingUntil'].is_a?(Hash)) unless errors.empty?
 
       return 0 if respect_cooldown && !cooldown_over?
 
@@ -161,10 +161,12 @@ module Omaflow
 
     def rule_name = @rule['name'].to_s
 
-    def log_invalid(errors)
+    def log_invalid(errors, quiet: false)
       detail = errors.map { "error: #{it}" }.join("\n")
-      Store.log_append({ 'at' => Sys.now_iso, 'kind' => @log_kind, 'execId' => @exec_id, 'ruleId' => @rule_id,
-                         'status' => 'invalid', 'detail' => detail })
+      unless quiet
+        Store.log_append({ 'at' => Sys.now_iso, 'kind' => @log_kind, 'execId' => @exec_id, 'ruleId' => @rule_id,
+                           'status' => 'invalid', 'detail' => detail })
+      end
       warn "Rule failed validation:\n#{detail}"
       1
     end
@@ -423,8 +425,10 @@ module Omaflow
     end
 
     def apply_hey_timetrack(action)
-      category = hey_category(action)
       return ['hey CLI is not installed', false] unless Sys.which('hey')
+
+      category = hey_category(action)
+      return ["no git branch readable at #{action['categoryFromRepo']}", false] if category.nil?
 
       case action['mode']
       when 'start' then start_hey_timetrack(category, check_current: true)
@@ -440,8 +444,8 @@ module Omaflow
 
     def hey_category(action)
       category = action.key?('category') ? template_message(message: action['category']) : ''
-      category = GitState.current_branch(File.expand_path(action['categoryFromRepo'])).to_s if action.key?('categoryFromRepo')
-      sanitize_hey_text(category, max: 100).strip
+      category = GitState.current_branch(action['categoryFromRepo']) if action.key?('categoryFromRepo')
+      sanitize_hey_text(category, max: 100).strip unless category.nil?
     end
 
     def start_hey_timetrack(category, check_current:)

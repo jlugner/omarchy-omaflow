@@ -91,6 +91,21 @@ run_env env HEY_CURRENT=active "$plugin_dir/bin/omaflow-run" start-idle
 [[ $(sha256sum "$state_dir/timetrack.json") == "$before" ]]
 run_env jq -e '.actions[0].detail == "already tracking"' "$state_dir/log.jsonl" >/dev/null
 
+cat >"$rules_dir/missing-repo.json" <<EOF
+{"schemaVersion":1,"id":"missing-repo","name":"Missing repo","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"hey-timetrack","mode":"switch","categoryFromRepo":"$test_root/no-such-repo"}],"cooldownSeconds":0,"source":"test"}
+EOF
+
+out=$(run_env "$plugin_dir/bin/omaflow-validate" "$rules_dir/missing-repo.json")
+grep -q "^warn:.*no git repository at $test_root/no-such-repo" <<<"$out"
+: >"$hey_log"
+if run_env env HEY_CURRENT=active "$plugin_dir/bin/omaflow-run" missing-repo >/dev/null 2>&1; then
+  echo "hey-timetrack started a track without a readable branch" >&2
+  exit 1
+fi
+[[ ! -s $hey_log ]]
+run_env jq -e '.ruleId == "missing-repo" and .status == "failed" and (.actions[0].detail | contains("no git branch readable"))' \
+  <(grep '"ruleId":"missing-repo"' "$state_dir/log.jsonl" | tail -1) >/dev/null
+
 cat >"$rules_dir/switch-track.json" <<'EOF'
 {"schemaVersion":1,"id":"switch-track","name":"Switch track","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"hey-timetrack","mode":"switch","category":"new category"}],"cooldownSeconds":0,"source":"test"}
 EOF
