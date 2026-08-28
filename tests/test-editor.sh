@@ -35,6 +35,7 @@ jq -e '.id == "manual-rule" and .actions[0].message == "hello"' "$test_root/desc
 jq '.name = "Edited rule" | .actions[0].message = "updated" | .createdBy = "manual"' \
   "$test_root/described.json" >"$test_root/edited.json"
 run_env "$plugin_dir/bin/omaflow" stage-file "$test_root/edited.json" >/dev/null
+run_env jq -e '.replaces == "manual-rule" and .previous.name == "Manual rule"' "$test_root/state/omaflow/staging.json" >/dev/null
 run_env "$plugin_dir/bin/omaflow" stage accept | grep -q 'Updated rule: manual-rule'
 run_env jq -e '.name == "Edited rule" and .actions[0].message == "updated"' \
   "$test_root/config/omaflow/rules/manual-rule.json" >/dev/null

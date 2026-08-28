@@ -720,13 +720,50 @@ Item {
     Quickshell.execDetached([root.cliPath].concat(args))
   }
 
-  function startAuthoring() {
+  function startAuthoring(revise) {
     var text = String(promptInput.text || "").trim()
     if (text === "" || root.compiling)
       return
+    var target = revise ? root.currentRule() : null
+    if (revise && !target)
+      return
     promptInput.text = ""
-    root.staging = { status: "compiling", request: text }
-    root.cli(["author", text])
+    if (target) {
+      root.staging = { status: "compiling", request: text, replaces: target.ruleId, replacesName: target.name }
+      root.cli(["revise", target.ruleId, text])
+    } else {
+      root.staging = { status: "compiling", request: text }
+      root.cli(["author", text])
+    }
+  }
+
+  function previewLines() {
+    if (!root.previewOpen) return []
+    var lines = root.summarizeRule(root.staging.rule)
+    if (!root.staging.previous)
+      return lines.map(function(line) { return { text: line, kind: "same" } })
+    return root.diffLines(root.summarizeRule(root.staging.previous), lines)
+  }
+
+  function diffLines(before, after) {
+    var table = []
+    for (var i = 0; i <= before.length; i++) {
+      table.push([])
+      for (var j = 0; j <= after.length; j++) table[i].push(0)
+    }
+    for (var b = before.length - 1; b >= 0; b--)
+      for (var a = after.length - 1; a >= 0; a--)
+        table[b][a] = before[b] === after[a] ? table[b + 1][a + 1] + 1 : Math.max(table[b + 1][a], table[b][a + 1])
+    var out = []
+    var x = 0, y = 0
+    while (x < before.length && y < after.length) {
+      if (before[x] === after[y]) { out.push({ text: after[y], kind: "same" }); x++; y++ }
+      else if (table[x + 1][y] >= table[x][y + 1]) out.push({ text: before[x++], kind: "removed" })
+      else out.push({ text: after[y++], kind: "added" })
+    }
+    while (x < before.length) out.push({ text: before[x++], kind: "removed" })
+    while (y < after.length) out.push({ text: after[y++], kind: "added" })
+    return out
   }
 
   function moveSelection(delta) {
@@ -2791,7 +2828,9 @@ Item {
 
               Text {
                 width: parent.width
-                text: root.previewOpen ? "“" + String(root.staging.request || "") + "”  ·  compiled by " + String(root.staging.agent || "?") : ""
+                text: root.previewOpen ? "“" + String(root.staging.request || "") + "”  ·  "
+                  + (root.staging.replaces ? "change to “" + String((root.staging.previous || {}).name || root.staging.replaces) + "” by " : "compiled by ")
+                  + String(root.staging.agent || "?") : ""
                 textFormat: Text.PlainText
                 color: root.foreground
                 opacity: 0.55
@@ -2801,16 +2840,18 @@ Item {
               }
 
               Repeater {
-                model: root.previewOpen ? root.summarizeRule(root.staging.rule) : []
+                model: root.previewLines()
 
                 Text {
                   required property var modelData
                   width: previewColumn.width
-                  text: modelData
+                  text: (modelData.kind === "added" ? "+ " : modelData.kind === "removed" ? "− " : "") + modelData.text
                   textFormat: Text.PlainText
-                  color: root.foreground
+                  color: modelData.kind === "added" ? root.accentColor : root.foreground
+                  opacity: modelData.kind === "removed" ? 0.45 : 1
                   font.family: Style.font.menuFamily
                   font.pixelSize: Style.font.caption
+                  font.strikeout: modelData.kind === "removed"
                   wrapMode: Text.Wrap
                 }
               }
@@ -2837,7 +2878,8 @@ Item {
             anchors.leftMargin: previewCard.contentLeftInset
             anchors.rightMargin: previewCard.contentRightInset
             anchors.bottomMargin: previewCard.contentBottomInset
-            text: (previewScroll.contentHeight > previewScroll.height ? "↕ scroll    " : "") + "↵ Install rule    Esc Discard"
+            text: (previewScroll.contentHeight > previewScroll.height ? "↕ scroll    " : "")
+              + (root.previewOpen && root.staging.replaces ? "↵ Apply change    Esc Discard" : "↵ Install rule    Esc Discard")
             textFormat: Text.PlainText
             color: root.foreground
             opacity: 0.45
@@ -2880,7 +2922,8 @@ Item {
 
           Text {
             visible: root.compiling
-            text: root.spinnerFrames[root.spinnerFrame] + "  compiling…"
+            text: root.spinnerFrames[root.spinnerFrame] + (root.compiling && root.staging.replaces
+              ? "  revising “" + String(root.staging.replacesName || root.staging.replaces) + "”…" : "  compiling…")
             color: root.accentColor
             opacity: 0.9
             font.family: Style.font.menuFamily
@@ -2908,7 +2951,7 @@ Item {
             anchors.leftMargin: Style.spacing.md
             anchors.verticalCenter: parent.verticalCenter
             visible: promptInput.text.length === 0
-            text: "Describe an automation…"
+            text: "Describe an automation, or a change to the selected one…"
             color: root.foreground
             opacity: 0.4
             font.family: Style.font.menuFamily
@@ -2992,7 +3035,7 @@ Item {
                   if (dryRule)
                     root.cli(["run", dryRule.ruleId, "--dry-run"])
                 } else {
-                  root.startAuthoring()
+                  root.startAuthoring((event.modifiers & Qt.ShiftModifier) !== 0)
                 }
                 event.accepted = true
               }
@@ -3154,7 +3197,7 @@ Item {
 
         Text {
           width: parent.width
-          text: "↵ Compile    Ctrl+N New    e Edit    Alt+↵ Run    Ctrl+↵ Dry-run    Ctrl+E Toggle    Alt+Del Delete"
+          text: "↵ Compile    Shift+↵ Revise    Ctrl+N New    e Edit    Alt+↵ Run    Ctrl+↵ Dry-run    Ctrl+E Toggle    Alt+Del Delete"
           textFormat: Text.PlainText
           color: root.foreground
           opacity: 0.45

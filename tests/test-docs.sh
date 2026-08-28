@@ -99,6 +99,10 @@ grep -q 'watched-dirs.json' "$plugin_dir/Service.qml"
 ! grep -q 'name === "switch"' "$plugin_dir/Service.qml"
 grep -q 'armed: rule.armed === true' "$plugin_dir/Omaflow.qml"
 grep -q 'model.armed' "$plugin_dir/Omaflow.qml"
+grep -q 'root.cli(\["revise", target.ruleId, text\])' "$plugin_dir/Omaflow.qml"
+grep -q 'Shift+↵ Revise' "$plugin_dir/Omaflow.qml"
+grep -q '`Shift+Return`' "$plugin_dir/README.md"
+grep -q 'omaflow revise <id> "<change>"' "$plugin_dir/README.md"
 jq -e '.description | contains("only explicit agent actions use AI when triggered")' "$plugin_dir/manifest.json" >/dev/null
 
 echo "test-docs: ok"

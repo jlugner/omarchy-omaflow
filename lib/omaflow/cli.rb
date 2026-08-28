@@ -12,6 +12,7 @@ module Omaflow
         omaflow setup [--yes]       wire the CLI, menu, and optional hotkey
         omaflow list                list rules
         omaflow author "<text>" [--agent codex|claude|grok]
+        omaflow revise <id> "<change>" [--agent codex|claude|grok]
         omaflow stage-file <path>
         omaflow stage <accept|reject|show>
         omaflow describe <id>
@@ -51,6 +52,7 @@ module Omaflow
       when 'first-run' then Onboarding.first_run
       when 'list' then list
       when 'author' then author_command(argv)
+      when 'revise' then revise_command(argv)
       when 'stage-file' then stage_file(argv.first)
       when 'stage' then stage(argv)
       when 'describe' then describe(argv.first)
@@ -100,17 +102,36 @@ module Omaflow
     end
 
     def author_command(argv)
+      request, agent, error = author_options(argv)
+      error || Author.compile(request, agent:)
+    end
+
+    def revise_command(argv)
+      id = argv.shift
+      request, agent, error = author_options(argv)
+      return error if error
+      return usage('omaflow revise <id> "<change>" [--agent codex|claude|grok]') if id.nil? || request.nil?
+
+      Author.compile(request, agent:, revise: id)
+    end
+
+    def author_options(argv)
       agent = nil
       request = nil
       until argv.empty?
         arg = argv.shift
         case arg
         when '--agent' then agent = argv.shift
-        when /\A-/ then return unknown_option(arg)
+        when /\A-/ then return [nil, nil, unknown_option(arg)]
         else request = arg
         end
       end
-      Author.compile(request, agent:)
+      [request, agent, nil]
+    end
+
+    def usage(text)
+      warn "Usage: #{text}"
+      2
     end
 
     def unknown_option(arg)
@@ -153,6 +174,9 @@ module Omaflow
         'rule' => rule,
         'warnings' => warnings.map { "warn: #{it}" }
       }
+      if rule.key?('createdAt') && installed_rule?(rule['id'])
+        staging.merge!('replaces' => rule['id'], 'previous' => Store.read_json(Paths.rule_file(rule['id']), {}))
+      end
       return 1 unless write_staging(staging).zero?
 
       puts "Staged rule: #{rule['name']}"
@@ -212,8 +236,12 @@ module Omaflow
         return 1
       end
       rule = staged['rule']
-      replacing = staged['agent'] == 'manual' && rule.key?('createdAt') && File.exist?(Paths.rule_file(rule['id']).to_s)
-      id = replacing ? rule['id'] : free_rule_id(rule['id'])
+      replacing = staged.key?('replaces')
+      if replacing && !installed_rule?(staged['replaces'])
+        warn "The rule being replaced no longer exists: #{staged['replaces']}"
+        return 1
+      end
+      id = replacing ? staged['replaces'] : free_rule_id(rule['id'])
       unless id
         warn 'Staged rule has an invalid id'
         return 1
@@ -237,6 +265,11 @@ module Omaflow
       Store.log_append({ 'at' => Sys.now_iso, 'kind' => replacing ? 'updated' : 'created', 'ruleId' => id, 'status' => 'ok' })
       puts "#{replacing ? 'Updated' : 'Installed'} rule: #{id}"
       0
+    end
+
+    def installed_rule?(id)
+      path = Paths.rule_file(id.to_s)
+      path ? File.exist?(path) : false
     end
 
     def free_rule_id(base_id)

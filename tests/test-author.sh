@@ -28,7 +28,10 @@ for arg in "$@"; do
   [[ $prev == "--output-last-message" ]] && out=$arg
   prev=$arg
 done
-if (( count == 1 )); then
+if [[ $* == *"You revise ONE existing"* ]]; then
+  printf '%s\n' "$*" >"$TEST_ROOT/revise-prompt"
+  answer='{"id":"renamed-by-agent","name":"Quiet mode","enabled":true,"trigger":{"type":"wifi-connected","match":{"known":false}},"actions":[{"type":"dnd","state":"on"},{"type":"nightlight","state":"off"},{"type":"notify","message":"New network - DND enabled"}],"cooldownSeconds":120}'
+elif (( count == 1 )); then
   answer='Sure! Here is the rule: {"id":"quiet-mode","name":"Quiet mode","enabled":true,"trigger":{"type":"nonsense"},"actions":[{"type":"dnd","state":"on"}]}'
 else
   answer='{"id":"quiet-mode","name":"Quiet mode","enabled":true,"trigger":{"type":"wifi-connected","match":{"known":false}},"actions":[{"type":"dnd","state":"on"},{"type":"notify","message":"New network - DND enabled"}],"cooldownSeconds":120}'
@@ -87,6 +90,41 @@ run_env "$plugin_dir/bin/omaflow" list | grep -q "quiet-mode"
 run_env "$plugin_dir/bin/omaflow" disable quiet-mode >/dev/null
 run_env jq -e '.enabled == false' "$test_root/config/omaflow/rules/quiet-mode.json" >/dev/null
 run_env "$plugin_dir/bin/omaflow" enable quiet-mode >/dev/null
+
+# Revise: the agent sees the current rule, and the staged result keeps the
+# id, createdAt, and enabled state no matter what the agent returned.
+run_env "$plugin_dir/bin/omaflow" disable quiet-mode >/dev/null
+run_env "$plugin_dir/bin/omaflow" revise quiet-mode "also turn off nightlight"
+grep -q '"id":"quiet-mode"' "$test_root/revise-prompt"
+grep -q 'Requested change.*also turn off nightlight' "$test_root/revise-prompt"
+run_env jq -e '
+  .status == "ready"
+  and .replaces == "quiet-mode"
+  and .previous.id == "quiet-mode"
+  and .rule.id == "quiet-mode"
+  and .rule.enabled == false
+  and .rule.createdAt == .previous.createdAt
+  and .rule.createdBy == "codex"
+  and .rule.source == "when I join an unknown wifi, enable dnd — also turn off nightlight"
+  and (.rule.actions | map(.type)) == ["dnd", "nightlight", "notify"]
+' "$state/staging.json" >/dev/null
+run_env "$plugin_dir/bin/omaflow" stage accept | grep -q "Updated rule: quiet-mode"
+run_env jq -e '.enabled == false and (.actions | length) == 3' "$test_root/config/omaflow/rules/quiet-mode.json" >/dev/null
+[[ ! -f $test_root/config/omaflow/rules/renamed-by-agent.json ]]
+grep -q '"kind":"updated","ruleId":"quiet-mode"' "$state/log.jsonl"
+run_env jq -e '.rules | length == 1' "$state/index.json" >/dev/null
+run_env "$plugin_dir/bin/omaflow" enable quiet-mode >/dev/null
+
+# Revise refuses unknown rules and missing text, and says so through staging.
+if run_env "$plugin_dir/bin/omaflow" revise no-such-rule "change it" 2>/dev/null; then
+  echo "revise accepted an unknown rule" >&2
+  exit 1
+fi
+run_env jq -e '.status == "error" and (.error | contains("No such rule: no-such-rule"))' "$state/staging.json" >/dev/null
+run_env "$plugin_dir/bin/omaflow" stage reject >/dev/null
+status=0
+run_env "$plugin_dir/bin/omaflow" revise quiet-mode >/dev/null 2>&1 || status=$?
+[[ $status == 2 ]]
 
 # Agent resolution: omaflow config beats the omarchy default.
 printf '#!/bin/bash\nif [[ $1 == -p ]]; then printf "%%s" "$2" >/dev/null; echo "{}"; fi\n' >"$fake_bin/grok"

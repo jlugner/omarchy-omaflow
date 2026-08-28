@@ -36,11 +36,14 @@ To uninstall, delete the `omaflow` link in `~/.local/bin`, remove the omaflow ma
 
 Open the inspector and describe an automation. A preview shows the exact trigger, conditions, and actions. `Return` installs it, `Esc` throws it away. Nothing runs that you haven't read.
 
+To change a rule, select it, describe the change ("also turn off nightlight", "only on weekdays"), and press `Shift+Return`. The agent revises that rule and the preview shows exactly what changed before you apply it.
+
 Build rules by hand in the editor: `Ctrl+N` starts a new visual chain, while `e` edits the selected rule. Saving opens the same staged preview for final confirmation.
 
 | Key | Action |
 |-----|--------|
 | `Return` | Compile the description, or install the previewed rule |
+| `Shift+Return` | Revise the selected rule with the description |
 | `Alt+Return` | Run the selected rule now |
 | `Ctrl+Return` | Dry-run: log what would execute |
 | `Ctrl+E` | Enable / disable |
@@ -57,6 +60,7 @@ Everything works from the CLI too:
 ```bash
 omaflow setup [--yes]
 omaflow author "on battery, enable dnd and dim ambitions"
+omaflow revise <id> "<change>"
 omaflow stage-file <path> · describe <id>
 omaflow stage show|accept|reject
 omaflow list · run <id> [--dry-run] · enable|disable|disarm|delete <id>
