@@ -13,6 +13,6 @@ module Omaflow
     AGENT_OPS = %w[close-window focus-window move-window-to-workspace notify].freeze
     WEEKDAYS = %w[mon tue wed thu fri sat sun].freeze
     WEBHOOK_FORMATS = %w[json slack discord ntfy raw].freeze
-    RULE_FIELDS = %w[schemaVersion id name enabled trigger conditions actions until cooldownSeconds source createdBy createdAt].freeze
+    RULE_FIELDS = %w[schemaVersion id name enabled trigger conditions actions while until cooldownSeconds source createdBy createdAt].freeze
   end
 end

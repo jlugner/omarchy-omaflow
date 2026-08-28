@@ -101,6 +101,18 @@ Set `"revert": true` in the `until` block to restore the revertible opening acti
 
 Run `omaflow disarm office-tracking` to cancel an armed lifecycle without running its closing actions.
 
+### While
+
+A rule with an `until` can also carry a `while` block: a trigger and actions that are live only between the opening fire and the closing event. Each matching event runs the while actions without arming, disarming, or checking the rule's conditions and cooldown. An interval `while` repeats every N minutes for as long as the rule is armed. If one event matches both the `while` and the `until`, the `until` wins and the rule closes.
+
+WHEN → WHILE → UNTIL turns the office example into one rule that follows your branch while you're there:
+
+```json
+{"schemaVersion":1,"id":"office-branch-tracking","name":"Office branch tracking","enabled":true,"trigger":{"type":"wifi-connected","match":{"ssid":"Office"}},"actions":[{"type":"hey-timetrack","mode":"switch","categoryFromRepo":"~/Documents/code/project"}],"while":{"trigger":{"type":"git-branch-changed","repo":"~/Documents/code/project"},"actions":[{"type":"hey-timetrack","mode":"switch","categoryFromRepo":"~/Documents/code/project"}]},"until":{"trigger":{"type":"wifi-disconnected"},"actions":[{"type":"hey-timetrack","mode":"stop"}]},"source":"on office wifi track the current branch, switch when it changes, stop when I leave"}
+```
+
+The repo is watched only while the rule is armed, so a rule like this costs nothing when you're not at the office.
+
 ### HEY
 
 Install the HEY CLI and sign in once:

@@ -64,6 +64,8 @@ module Omaflow
       [['not a JSON object'], []]
     end
 
+    MANUAL_UNTIL_ERROR = 'an until needs an event; to end manually, run omaflow disarm <id>'
+
     def initialize(rule)
       @rule = rule
       @errors = []
@@ -72,12 +74,13 @@ module Omaflow
 
     def validate(phase: :rule)
       check_top_level
-      unless phase == :until
+      if phase == :rule
         check_trigger
         check_conditions
         check_actions
       end
       check_until
+      check_while unless phase == :until
       [errors, warnings]
     end
 
@@ -122,6 +125,7 @@ module Omaflow
       err('trigger must be an object') unless @rule['trigger'].is_a?(Hash)
       err('actions must be a non-empty array (max 10)') unless @rule['actions'].is_a?(Array) && @rule['actions'].size.between?(1, 10)
       err('until must be an object') if @rule.key?('until') && !@rule['until'].is_a?(Hash)
+      err('while must be an object') if @rule.key?('while') && !@rule['while'].is_a?(Hash)
       conditions = @rule.fetch('conditions', [])
       err('conditions must be an array (max 5)') unless conditions.is_a?(Array) && conditions.size <= 5
       cooldown = @rule.fetch('cooldownSeconds', 60)
@@ -148,7 +152,9 @@ module Omaflow
       check = TRIGGER_CHECKS[type]
       return err("unknown trigger type: #{type}") unless check
 
-      err('an until needs an event; to end manually, run omaflow disarm <id>') if type == 'manual' && !manual
+      if type == 'manual' && !manual
+        err(label == '.while.trigger' ? 'a while needs an event to react to' : MANUAL_UNTIL_ERROR)
+      end
       send(check, trigger)
     ensure
       @trigger_label = nil
@@ -349,6 +355,20 @@ module Omaflow
       check_action_list(actions) if actions.is_a?(Array)
       revertible = @rule.fetch('actions', []).any? { it.is_a?(Hash) && Executor::SNAPSHOTTED.key?(it['type']) }
       warn("nothing in this rule's actions can be reverted") if revert == true && !revertible
+    end
+
+    def check_while
+      while_block = @rule['while']
+      return unless while_block.is_a?(Hash)
+
+      unknown_keys(while_block, %w[trigger actions], '.while')
+      err('while needs an until; the state it reacts in has to end somewhere') unless @rule['until'].is_a?(Hash)
+      trigger = while_block['trigger']
+      actions = while_block['actions']
+      err('while.trigger must be an object') unless trigger.is_a?(Hash)
+      err('while.actions must be a non-empty array (max 10)') unless actions.is_a?(Array) && actions.size.between?(1, 10)
+      validate_trigger(trigger, label: '.while.trigger', manual: false) if trigger.is_a?(Hash)
+      check_action_list(actions) if actions.is_a?(Array)
     end
 
     def check_action_list(actions)

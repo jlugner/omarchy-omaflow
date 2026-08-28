@@ -62,6 +62,13 @@ module Omaflow
       code
     end
 
+    def self.run_while(rule_id, trigger:, trigger_data:)
+      locked = Store.with_lock('.run.lock') do
+        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :while)
+      end
+      locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
+    end
+
     def self.revert(exec_id, &)
       locked = Store.with_lock('.run.lock') { return new.revert(exec_id, &) }
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
@@ -83,8 +90,8 @@ module Omaflow
       @trigger_data = trigger_data.is_a?(Hash) ? trigger_data : {}
       @exec_id = "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(4)}"
       @phase = phase
-      @actions = phase == :until ? @rule.dig('until', 'actions') : @rule['actions']
-      @log_kind = phase == :until ? 'until' : 'run'
+      @actions = phase == :rule ? @rule['actions'] : @rule.dig(phase.to_s, 'actions')
+      @log_kind = phase == :rule ? 'run' : phase.to_s
 
       errors, = Validator.new(@rule).validate(phase:)
       errors << "rule id '#{@rule['id']}' does not match its filename" unless @rule['id'] == rule_id
@@ -346,7 +353,7 @@ module Omaflow
                 'status' => status, 'actions' => results }
       entry['detail'] = @detail if @detail
       Store.log_append(entry)
-      return if dry_run || @phase == :until
+      return if dry_run || @phase != :rule
 
       cooldowns = Store.read_json(Paths.cooldowns_file, {})
       cooldowns[@rule_id] = { 'lastFiredAt' => Sys.now_iso, 'lastFiredEpoch' => Time.now.to_i }

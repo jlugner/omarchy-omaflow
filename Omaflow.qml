@@ -26,6 +26,7 @@ Item {
   property bool editorEnabled: true
   property var editorTrigger: ({ type: "manual" })
   property var editorUntilTrigger: null
+  property var editorWhileTrigger: null
   property bool editorUntilRevert: false
 
   readonly property var triggerTypes: ["manual", "time", "interval", "lid-opened", "lid-closed", "monitor-connected", "monitor-disconnected", "app-opened", "app-closed", "wifi-connected", "wifi-disconnected", "power-source", "file-created", "folder-created", "git-branch-changed", "custom"]
@@ -75,6 +76,7 @@ Item {
   readonly property color flowAction: themeHue(["magenta", "bright_magenta", "color5"], accentColor)
   readonly property color flowLine: themeHue(["green", "bright_green", "color2"], accentColor)
   readonly property color flowUntil: themeHue(["orange", "bright_red", "red", "color1"], accentColor)
+  readonly property color flowWhile: themeHue(["cyan", "bright_cyan", "color6"], accentColor)
   readonly property var untilTypes: triggerTypes.filter(function(t) { return t !== "manual" })
 
   readonly property color editorHairline: Qt.alpha(foreground, 0.16)
@@ -179,8 +181,9 @@ Item {
   property int pickerIndex: 0
   readonly property var pickerFiltered: {
     if (pickerTarget === null) return []
-    var types = pickerTarget.kind === "trigger" ? triggerTypes : pickerTarget.kind === "until" ? untilTypes : pickerTarget.kind === "condition" ? conditionTypes : actionTypes
-    var captions = pickerTarget.kind === "trigger" || pickerTarget.kind === "until" ? triggerCaptions : pickerTarget.kind === "condition" ? conditionCaptions : actionCaptions
+    var lifecycle = pickerTarget.kind === "until" || pickerTarget.kind === "while"
+    var types = pickerTarget.kind === "trigger" ? triggerTypes : lifecycle ? untilTypes : pickerTarget.kind === "condition" ? conditionTypes : actionTypes
+    var captions = pickerTarget.kind === "trigger" || lifecycle ? triggerCaptions : pickerTarget.kind === "condition" ? conditionCaptions : actionCaptions
     var query = pickerQuery.toLowerCase()
     var options = []
     for (var i = 0; i < types.length; i++) {
@@ -195,6 +198,7 @@ Item {
   readonly property color pickerTint: pickerTarget === null ? accentColor
     : pickerTarget.kind === "trigger" ? flowTrigger
     : pickerTarget.kind === "until" ? flowUntil
+    : pickerTarget.kind === "while" ? flowWhile
     : pickerTarget.kind === "condition" ? flowCondition
     : flowAction
 
@@ -219,6 +223,8 @@ Item {
     if (root.pickerTarget.kind === "trigger") root.editorTrigger = root.defaultTrigger(choice)
     else if (root.pickerTarget.kind === "until") root.editorUntilTrigger = root.defaultTrigger(choice)
     else if (root.pickerTarget.kind === "until-action") editorUntilActions.set(root.pickerTarget.index, root.defaultAction(choice))
+    else if (root.pickerTarget.kind === "while") root.editorWhileTrigger = root.defaultTrigger(choice)
+    else if (root.pickerTarget.kind === "while-action") editorWhileActions.set(root.pickerTarget.index, root.defaultAction(choice))
     else if (root.pickerTarget.kind === "condition") editorConditions.set(root.pickerTarget.index, root.defaultCondition(choice))
     else editorActions.set(root.pickerTarget.index, root.defaultAction(choice))
     root.closePicker()
@@ -245,6 +251,7 @@ Item {
   ListModel { id: editorConditions; dynamicRoles: true }
   ListModel { id: editorActions; dynamicRoles: true }
   ListModel { id: editorUntilActions; dynamicRoles: true }
+  ListModel { id: editorWhileActions; dynamicRoles: true }
 
   function open(payloadJson) {
     root.confirmDeleteId = ""
@@ -368,6 +375,8 @@ Item {
     editorUntilActions.clear()
     root.editorUntilTrigger = null
     root.editorUntilRevert = false
+    editorWhileActions.clear()
+    root.editorWhileTrigger = null
     editorName.text = ""
     editorCooldown.text = "60"
     root.editorLoading = false
@@ -457,6 +466,12 @@ Item {
       root.editorUntilRevert = rule.until.revert === true
       root.loadActionsInto(editorUntilActions, rule.until.actions || [])
     }
+    editorWhileActions.clear()
+    root.editorWhileTrigger = null
+    if (rule.while && rule.while.trigger) {
+      root.editorWhileTrigger = root.clone(rule.while.trigger)
+      root.loadActionsInto(editorWhileActions, rule.while.actions || [])
+    }
     if (editorActions.count === 0) editorActions.append(root.defaultAction("notify"))
     root.editorLoading = false
     Qt.callLater(function() { triggerSelector.forceActiveFocus() })
@@ -532,6 +547,13 @@ Item {
     if (root.editorCreatedAt !== "") rule.createdAt = root.editorCreatedAt
     for (var c = 0; c < editorConditions.count; c++) rule.conditions.push(root.conditionRule(editorConditions.get(c)))
     for (var a = 0; a < editorActions.count; a++) rule.actions.push(root.actionRule(editorActions.get(a)))
+    if (root.editorUntilTrigger !== null && root.editorWhileTrigger !== null && editorWhileActions.count > 0) {
+      var whileTrigger = root.clone(root.editorWhileTrigger)
+      if (whileTrigger.type === "interval") whileTrigger.minutes = root.integerOrText(whileTrigger.minutes)
+      var whileActions = []
+      for (var w = 0; w < editorWhileActions.count; w++) whileActions.push(root.actionRule(editorWhileActions.get(w)))
+      rule.while = { trigger: whileTrigger, actions: whileActions }
+    }
     if (root.editorUntilTrigger !== null && (editorUntilActions.count > 0 || root.editorUntilRevert)) {
       var untilTrigger = root.clone(root.editorUntilTrigger)
       if (untilTrigger.type === "interval") untilTrigger.minutes = root.integerOrText(untilTrigger.minutes)
@@ -629,6 +651,27 @@ Item {
     return d.getDate() + " " + months[d.getMonth()] + " " + hh + ":" + mm
   }
 
+  function lifecycleWhen(t, intervalWord) {
+    var when = String(t.type || "?")
+    if (t.match) when += ": " + (t.match.description || t.match.name || t.match.class || t.match.title || t.match.ssid || t.match.branch || "")
+    if (t.minutes) when += " " + intervalWord + " " + t.minutes + " min"
+    if (t.path) when += ": " + t.path
+    if (t.repo) when += ": " + t.repo
+    if (t.name) when += ": " + t.name
+    return when
+  }
+
+  function lifecycleThen(action) {
+    var text = String(action.type || "?")
+    if (action.name) text += " → " + action.name
+    if (action.mode) text += " → " + action.mode
+    if (action.category) text += " (file under: " + action.category + ")"
+    if (action.categoryFromRepo) text += " (file under current branch of " + action.categoryFromRepo + ")"
+    if (action.endpoint) text += " → " + action.endpoint
+    if (action.message) text += " \"" + action.message + "\""
+    return text
+  }
+
   function summarizeRule(rule) {
     if (!rule) return []
     var lines = []
@@ -681,28 +724,16 @@ Item {
       if (action.can) atext += " [can: " + action.can.join(", ") + "]"
       lines.push((a === 0 ? "Do     " : "       ") + atext)
     }
+    if (rule.while && rule.while.trigger) {
+      lines.push("While  " + root.lifecycleWhen(rule.while.trigger, "every"))
+      var wacts = rule.while.actions || []
+      for (var wa = 0; wa < wacts.length; wa++) lines.push("  then " + root.lifecycleThen(wacts[wa]))
+    }
     if (rule.until && rule.until.trigger) {
-      var ut = rule.until.trigger
-      var uwhen = String(ut.type || "?")
-      if (ut.match) uwhen += ": " + (ut.match.description || ut.match.name || ut.match.class || ut.match.title || ut.match.ssid || ut.match.branch || "")
-      if (ut.minutes) uwhen += " after " + ut.minutes + " min"
-      if (ut.path) uwhen += ": " + ut.path
-      if (ut.repo) uwhen += ": " + ut.repo
-      if (ut.name) uwhen += ": " + ut.name
-      lines.push("Until  " + uwhen)
+      lines.push("Until  " + root.lifecycleWhen(rule.until.trigger, "after"))
       if (rule.until.revert === true) lines.push("  then restore what this rule changed")
       var uacts = rule.until.actions || []
-      for (var ua = 0; ua < uacts.length; ua++) {
-        var uaction = uacts[ua]
-        var uatext = String(uaction.type || "?")
-        if (uaction.name) uatext += " → " + uaction.name
-        if (uaction.mode) uatext += " → " + uaction.mode
-        if (uaction.category) uatext += " (file under: " + uaction.category + ")"
-        if (uaction.categoryFromRepo) uatext += " (file under current branch of " + uaction.categoryFromRepo + ")"
-        if (uaction.endpoint) uatext += " → " + uaction.endpoint
-        if (uaction.message) uatext += " \"" + uaction.message + "\""
-        lines.push("  then " + uatext)
-      }
+      for (var ua = 0; ua < uacts.length; ua++) lines.push("  then " + root.lifecycleThen(uacts[ua]))
     }
     var cooldown = (rule.cooldownSeconds === undefined || rule.cooldownSeconds === null)
       ? 60 : rule.cooldownSeconds
@@ -1061,7 +1092,7 @@ Item {
             onCycle: function(delta) {
               actionDelegate.store.set(actionDelegate.index, root.defaultAction(root.cycleValue(root.actionTypes, value, delta)))
             }
-            onOpenPicker: root.openTypePicker(actionDelegate.store === editorActions ? "action" : "until-action", actionDelegate.index, actionTypeSelector)
+            onOpenPicker: root.openTypePicker(actionDelegate.store === editorActions ? "action" : actionDelegate.store === editorWhileActions ? "while-action" : "until-action", actionDelegate.index, actionTypeSelector)
           }
 
           Row {
@@ -2373,6 +2404,122 @@ Item {
 
             Item {
               width: parent.width
+              visible: root.editorUntilTrigger !== null && root.editorWhileTrigger === null
+              height: visible ? addWhileButton.height + Style.spacing.sm : 0
+
+              EditorButton {
+                id: addWhileButton
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: Style.spacing.sm
+                label: "＋ while…"
+                ghost: true
+                accented: true
+                tintColor: root.flowWhile
+                onClicked: {
+                  root.editorWhileTrigger = root.defaultTrigger("interval")
+                  editorWhileActions.append(root.defaultAction("notify"))
+                }
+              }
+            }
+
+            Connector {
+              visible: root.editorWhileTrigger !== null
+              arrow: true
+              label: "WHILE"
+              tint: root.flowWhile
+            }
+
+            FocusScope {
+              id: whileTriggerNode
+              width: parent.width
+              visible: root.editorWhileTrigger !== null
+              height: root.editorWhileTrigger === null ? 0 : whileCard.height
+              onActiveFocusChanged: root.revealEditorNode(whileTriggerNode)
+
+              NodeCard {
+                id: whileCard
+                focusedNode: whileTriggerNode.activeFocus
+                rail: root.flowWhile
+
+                Row {
+                  width: parent.width
+                  spacing: Style.spacing.sm
+
+                  NodeBadge {
+                    id: whileBadge
+                    anchors.top: parent.top
+                    label: "WHILE"
+                    tint: root.flowWhile
+                  }
+
+                  TypeSelector {
+                    id: whileSelector
+                    width: parent.width - whileBadge.width - removeWhile.width - parent.spacing * 2
+                    value: String((root.editorWhileTrigger || {}).type || "")
+                    caption: root.editorWhileTrigger === null ? "" : "while this rule is armed, " + root.describeTrigger(root.editorWhileTrigger).replace("fires", "reacts")
+                    onCycle: function(delta) {
+                      root.editorWhileTrigger = root.defaultTrigger(root.cycleValue(root.untilTypes, value, delta))
+                    }
+                    onOpenPicker: root.openTypePicker("while", 0, whileSelector)
+                  }
+
+                  EditorButton {
+                    id: removeWhile
+                    anchors.top: parent.top
+                    label: "×"
+                    ghost: true
+                    onClicked: {
+                      root.editorWhileTrigger = null
+                      editorWhileActions.clear()
+                    }
+                  }
+                }
+
+                TriggerFields {
+                  width: parent.width
+                  trigger: root.editorWhileTrigger || ({})
+                  onEdited: function(trigger) { root.editorWhileTrigger = trigger }
+                }
+              }
+            }
+
+            Connector {
+              visible: root.editorWhileTrigger !== null
+              tint: root.flowWhile
+            }
+
+            Repeater {
+              model: root.editorWhileTrigger === null ? null : editorWhileActions
+
+              ActionNode {
+                store: editorWhileActions
+                sectionTint: root.flowWhile
+              }
+            }
+
+            Item {
+              width: parent.width
+              visible: root.editorWhileTrigger !== null
+              height: root.editorWhileTrigger === null ? 0 : addWhileActionButton.height + Style.spacing.sm
+
+              EditorButton {
+                id: addWhileActionButton
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: Style.spacing.sm
+                label: editorWhileActions.count >= 10 ? "10 actions maximum" : "＋ do while armed…"
+                ghost: true
+                accented: true
+                tintColor: root.flowWhile
+                enabled: editorWhileActions.count < 10
+                opacity: enabled ? 1 : 0.4
+                onClicked: if (enabled) editorWhileActions.append(root.defaultAction("notify"))
+              }
+            }
+
+            Item {
+              width: parent.width
               visible: root.editorUntilTrigger === null
               height: addUntilButton.height + Style.spacing.sm
 
@@ -2442,6 +2589,8 @@ Item {
                       root.editorUntilTrigger = null
                       root.editorUntilRevert = false
                       editorUntilActions.clear()
+                      root.editorWhileTrigger = null
+                      editorWhileActions.clear()
                     }
                   }
                 }

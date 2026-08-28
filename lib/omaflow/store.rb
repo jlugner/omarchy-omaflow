@@ -142,6 +142,16 @@ module Omaflow
       removed
     end
 
+    def touch_while(rule_id)
+      mutate_armed do |rules|
+        armed = rules[rule_id]
+        next false unless armed.is_a?(Hash)
+
+        armed['whileEpoch'] = Time.now.to_i
+        true
+      end
+    end
+
     def defer_until(rule_id, event:)
       mutate_armed do |rules|
         armed = rules[rule_id]
@@ -208,7 +218,11 @@ module Omaflow
       triggers << rule['trigger'] if rule['enabled'] == true && rule['trigger'].is_a?(Hash)
       until_block = rule['until'].is_a?(Hash) ? rule['until'] : {}
       until_trigger = until_block['trigger']
-      triggers << until_trigger if armed_rules.key?(rule['id']) && until_trigger.is_a?(Hash)
+      while_trigger = rule['while'].is_a?(Hash) ? rule['while']['trigger'] : nil
+      if armed_rules.key?(rule['id'])
+        triggers << until_trigger if until_trigger.is_a?(Hash)
+        triggers << while_trigger if while_trigger.is_a?(Hash)
+      end
       triggers
     end
 

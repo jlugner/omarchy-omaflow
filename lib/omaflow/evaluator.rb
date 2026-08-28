@@ -51,8 +51,10 @@ module Omaflow
         armed_ids = Store.armed.keys
         fire_matching_rules(event)
         fire_until_rules([event], rule_ids: armed_ids, intervals: false)
+        fire_while_rules([event], rule_ids: armed_ids, intervals: false)
       end
       fire_until_rules([], intervals: true)
+      fire_while_rules([], intervals: true)
     end
 
     private
@@ -420,6 +422,30 @@ module Omaflow
       end
     end
 
+    def fire_while_rules(events, intervals:, rule_ids: nil)
+      load_armed.each do |rule_id, armed|
+        next if rule_ids && !rule_ids.include?(rule_id)
+        next unless armed.is_a?(Hash) && !armed['pendingUntil'].is_a?(Hash)
+
+        path = Paths.rule_file(rule_id)
+        next unless path && File.exist?(path)
+
+        trigger = Store.load_json!(path, {}).dig('while', 'trigger')
+        next unless trigger.is_a?(Hash)
+
+        event = matching_while_event(trigger, armed, events, intervals:)
+        next unless event
+
+        Store.touch_while(rule_id) if trigger['type'] == 'interval'
+        Executor.run_while(rule_id, trigger: "while:#{trigger['type']}", trigger_data: event['data'] || {})
+      rescue JSON::ParserError, IOError
+        next
+      rescue StandardError => e
+        Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule_id,
+                           'status' => 'error', 'detail' => "#{e.class}: #{e.message}" })
+      end
+    end
+
     def load_armed
       return {} unless File.exist?(Paths.armed_file)
 
@@ -431,10 +457,18 @@ module Omaflow
     def matching_until_event(trigger, armed, events, intervals:)
       return unless trigger.is_a?(Hash) && armed.is_a?(Hash)
 
+      matching_lifecycle_event(trigger, events, intervals:, since: armed['armedEpoch'].to_i)
+    end
+
+    def matching_while_event(trigger, armed, events, intervals:)
+      matching_lifecycle_event(trigger, events, intervals:, since: [armed['armedEpoch'].to_i, armed['whileEpoch'].to_i].max)
+    end
+
+    def matching_lifecycle_event(trigger, events, intervals:, since:)
       if trigger['type'] == 'interval'
         return unless intervals
 
-        elapsed = @now.to_i - armed['armedEpoch'].to_i >= trigger['minutes'].to_i * 60
+        elapsed = @now.to_i - since >= trigger['minutes'].to_i * 60
         return { 'type' => 'interval', 'data' => {} } if elapsed
 
         return nil
