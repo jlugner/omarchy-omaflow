@@ -97,5 +97,8 @@ grep -q 'gdbus.*org.freedesktop.UPower' "$plugin_dir/Service.qml"
 grep -q 'inotifywait.*create,moved_to' "$plugin_dir/Service.qml"
 grep -q 'watched-dirs.json' "$plugin_dir/Service.qml"
 ! grep -q 'name === "switch"' "$plugin_dir/Service.qml"
+grep -q 'armed: rule.armed === true' "$plugin_dir/Omaflow.qml"
+grep -q 'model.armed' "$plugin_dir/Omaflow.qml"
+jq -e '.description | contains("only explicit agent actions use AI when triggered")' "$plugin_dir/manifest.json" >/dev/null
 
 echo "test-docs: ok"

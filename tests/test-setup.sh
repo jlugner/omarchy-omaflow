@@ -19,6 +19,7 @@ cat >"$fake_bin/notify-send" <<'SH'
 printf '%s\n' "$*" >>"$NOTIFY_LOG"
 SH
 
+ln -s notify-send "$fake_bin/omarchy-notification-send"
 chmod +x "$fake_bin/hyprctl" "$fake_bin/notify-send"
 test_path="$fake_bin:/usr/bin:/bin"
 
@@ -73,6 +74,33 @@ cp "$lua_bindings" "$test_root/lua-before"
 run_cli "$lua_home" setup --yes >/dev/null
 same_file_content "$test_root/lua-before" "$lua_bindings"
 [[ $(grep -c -- '-- omaflow:begin' "$lua_bindings") == 1 ]]
+
+symlink_home="$test_root/symlink-home"
+symlink_targets="$test_root/symlink-targets"
+symlink_menu="$symlink_home/.config/omarchy/extensions/omarchy-menu.jsonc"
+symlink_bindings="$symlink_home/.config/hypr/bindings.conf"
+mkdir -p "$(dirname "$symlink_menu")" "$(dirname "$symlink_bindings")" "$symlink_targets"
+printf '{\n  "existing": {"label": "Keep"}\n}\n' >"$symlink_targets/menu.jsonc"
+printf 'bind = SUPER, Return, exec, foot\n' >"$symlink_targets/bindings.conf"
+ln -s "$symlink_targets/menu.jsonc" "$symlink_menu"
+ln -s "$symlink_targets/bindings.conf" "$symlink_bindings"
+run_cli "$symlink_home" setup --yes >/dev/null
+[[ -L $symlink_menu ]]
+[[ -L $symlink_bindings ]]
+grep -q '// omaflow:begin' "$symlink_targets/menu.jsonc"
+grep -q '# omaflow:begin' "$symlink_targets/bindings.conf"
+
+collision_home="$test_root/collision-home"
+collision_menu="$collision_home/.config/omarchy/extensions/omarchy-menu.jsonc"
+mkdir -p "$(dirname "$collision_menu")"
+printf '{\n  "automations": {"label": "Existing", "action": "keep-me"}\n}\n' >"$collision_menu"
+cp "$collision_menu" "$test_root/collision-before"
+if run_cli "$collision_home" setup --yes >"$test_root/collision.out" 2>&1; then
+  echo 'existing automations menu entry was accepted' >&2
+  exit 1
+fi
+grep -q 'already has an unmarked automations entry; refusing to overwrite' "$test_root/collision.out"
+same_file_content "$test_root/collision-before" "$collision_menu"
 
 foreign_home="$test_root/foreign-home"
 mkdir -p "$foreign_home/.local/bin"

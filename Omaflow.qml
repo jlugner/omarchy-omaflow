@@ -583,6 +583,7 @@ Item {
         ruleId: String(rule.id || ""),
         name: String(rule.name || rule.id || ""),
         enabled: rule.enabled === true,
+        armed: rule.armed === true,
         triggerSummary: String(rule.triggerSummary || ""),
         actionsSummary: String(rule.actionsSummary || ""),
         conditionCount: Number(rule.conditionCount || 0),
@@ -3056,10 +3057,10 @@ Item {
               anchors.left: parent.left
               anchors.leftMargin: Style.spacing.md
               anchors.verticalCenter: parent.verticalCenter
-              color: model.enabled ? root.accentColor : "transparent"
-              border.width: model.enabled ? 0 : 1
+              color: model.armed ? root.flowUntil : model.enabled ? root.accentColor : "transparent"
+              border.width: model.armed || model.enabled ? 0 : 1
               border.color: root.foreground
-              opacity: model.enabled ? 1 : 0.4
+              opacity: model.armed || model.enabled ? 1 : 0.4
             }
 
             Column {
@@ -3075,7 +3076,7 @@ Item {
                 text: model.name
                 textFormat: Text.PlainText
                 color: row.isCurrent ? root.selectedText : root.foreground
-                opacity: model.enabled ? 1 : 0.55
+                opacity: model.enabled || model.armed ? 1 : 0.55
                 font.family: Style.font.menuFamily
                 font.pixelSize: Style.font.body
                 elide: Text.ElideRight
@@ -3083,7 +3084,7 @@ Item {
 
               Text {
                 width: parent.width
-                text: model.triggerSummary
+                text: (model.armed ? "armed · " : "") + model.triggerSummary
                   + (model.conditionCount > 0 ? " · " + model.conditionCount + (model.conditionCount === 1 ? " condition" : " conditions") : "")
                   + " → " + model.actionsSummary
                   + " · last: " + root.formatWhen(model.lastFired)

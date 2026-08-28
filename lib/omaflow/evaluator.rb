@@ -31,6 +31,7 @@ module Omaflow
       @previous = previous_domains
       @rules = Store.rules
       @armed_rules = Store.armed
+      @pending_until_attempted = {}
       @file_trigger_dirs = Store.file_trigger_dirs(@rules, @armed_rules).first(WATCH_DIR_LIMIT)
       @file_keys = @file_trigger_dirs.map { file_probe_key(it) }
       @git_repos = Store.git_repos(@rules, @armed_rules).first(GIT_REPO_LIMIT)
@@ -394,28 +395,29 @@ module Omaflow
           next
         end
 
-        event = matching_until_event(rule['until']['trigger'], armed, events, intervals:)
+        event = if armed['pendingUntil'].is_a?(Hash)
+                  pending_until_event(rule_id)
+                else
+                  matching_until_event(rule['until']['trigger'], armed, events, intervals:)
+                end
         next unless event
 
         trigger_type = rule.dig('until', 'trigger', 'type')
-        detail = revert_until(rule, armed)
-        Executor.run_until(rule_id, trigger: "until:#{trigger_type}", trigger_data: event['data'] || {}, detail:)
-        Store.disarm(rule_id)
+        outcome = nil
+        Executor.run_until(rule_id, trigger: "until:#{trigger_type}", trigger_data: event['data'] || {}, armed:) do |result|
+          outcome = result
+        end
+        if outcome&.fetch('started', false)
+          Store.disarm(rule_id)
+        else
+          Store.defer_until(rule_id, event:)
+        end
       rescue JSON::ParserError, IOError
         next
       rescue StandardError => e
         Store.log_append({ 'at' => Sys.now_iso, 'kind' => 'error', 'ruleId' => rule_id,
                            'status' => 'error', 'detail' => "#{e.class}: #{e.message}" })
       end
-    end
-
-    def revert_until(rule, armed)
-      return unless rule.dig('until', 'revert') == true
-
-      outcome = nil
-      Executor.revert(armed['execId']) { outcome = it }
-      outcome ||= { 'status' => 'failed', 'detail' => 'revert outcome unavailable' }
-      ["revert: #{outcome['status']}", outcome['detail']].compact.join(' — ')
     end
 
     def load_armed
@@ -440,6 +442,16 @@ module Omaflow
       events.find do |event|
         event['type'] == trigger['type'] && trigger_matches?(trigger, event, interval_elapsed: false)
       end
+    end
+
+    def pending_until_event(rule_id)
+      return if @pending_until_attempted[rule_id]
+
+      pending = @armed_rules.dig(rule_id, 'pendingUntil')
+      return unless pending.is_a?(Hash) && pending['type'].is_a?(String) && pending['data'].is_a?(Hash)
+
+      @pending_until_attempted[rule_id] = true
+      { 'type' => pending['type'], 'data' => pending['data'] }
     end
 
     def trigger_description(event)

@@ -113,7 +113,7 @@ run_ruby '
   Omaflow::Paths.ensure_dirs
   File.delete(Omaflow::Paths.log_file) if File.exist?(Omaflow::Paths.log_file)
   File.write(Omaflow::Paths.log_file, ("{\"at\":\"x\"}\n" * 500_000))
-' 
+'
 HOME="$test_root" XDG_CONFIG_HOME="$test_root/config" XDG_STATE_HOME="$test_root/state" \
   PATH="$test_root/bin:/usr/bin:/bin" timeout 10 "$plugin_dir/bin/omaflow" log 3 >/dev/null
 echo "test-hardening: ok"

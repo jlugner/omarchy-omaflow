@@ -50,6 +50,22 @@ run_env() {
 
 rules_dir="$test_root/config/omaflow/rules"
 state="$test_root/state/omaflow"
+opening_script="$test_root/opening-script"
+closing_script="$test_root/closing-script"
+
+cat >"$opening_script" <<'EOF'
+#!/bin/bash
+printf 'opening-script\n' >>"$TEST_CALLS"
+EOF
+chmod +x "$opening_script"
+cat >"$closing_script" <<'EOF'
+#!/bin/bash
+printf 'closing-script\n' >>"$TEST_CALLS"
+EOF
+chmod +x "$closing_script"
+printf '{"opening-only":{"path":"%s","description":"Opening dependency"},"closing-only":{"path":"%s","description":"Closing dependency"}}\n' \
+  "$opening_script" "$closing_script" \
+  >"$test_root/config/omaflow/scripts.json"
 
 cat >"$rules_dir/office.json" <<'EOF'
 {
@@ -88,6 +104,14 @@ EOF
 
 cat >"$rules_dir/missing-snapshot.json" <<'EOF'
 {"schemaVersion":1,"id":"missing-snapshot","name":"Missing snapshot","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"dnd","state":"on"}],"until":{"trigger":{"type":"custom","name":"missing-snapshot-closed"},"revert":true,"actions":[{"type":"notify","message":"missing snapshot closed"}]},"cooldownSeconds":0,"source":"test"}
+EOF
+
+cat >"$rules_dir/phase-close.json" <<'EOF'
+{"schemaVersion":1,"id":"phase-close","name":"Phase close","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"script","name":"opening-only"}],"until":{"trigger":{"type":"custom","name":"phase-close-event"},"actions":[{"type":"notify","message":"phase close ran"}]},"cooldownSeconds":0,"source":"test"}
+EOF
+
+cat >"$rules_dir/preflight-close.json" <<'EOF'
+{"schemaVersion":1,"id":"preflight-close","name":"Preflight close","enabled":true,"trigger":{"type":"manual"},"actions":[{"type":"notify","message":"preflight opened"}],"until":{"trigger":{"type":"custom","name":"preflight-close-event"},"actions":[{"type":"script","name":"closing-only"}]},"cooldownSeconds":0,"source":"test"}
 EOF
 
 echo 'yes:Home' >"$wifi"
@@ -155,6 +179,33 @@ grep -q 'omarchy-notification-send.*missing snapshot closed' "$calls"
 run_env jq -e 'has("missing-snapshot") | not' "$state/armed.json" >/dev/null
 run_env jq -e '.status == "ok" and .detail == "revert: skipped — snapshot expired or missing"' \
   <(grep '"kind":"until".*"ruleId":"missing-snapshot"' "$state/log.jsonl" | tail -1) >/dev/null
+
+run_env "$plugin_dir/bin/omaflow-run" phase-close >/dev/null
+grep -q '^opening-script$' "$calls"
+rm "$opening_script"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow" trigger phase-close-event >/dev/null
+grep -q 'omarchy-notification-send.*phase close ran' "$calls"
+run_env jq -e 'has("phase-close") | not' "$state/armed.json" >/dev/null
+run_env jq -e '.kind == "until" and .ruleId == "phase-close" and .status == "ok"' \
+  <(grep '"kind":"until".*"ruleId":"phase-close"' "$state/log.jsonl" | tail -1) >/dev/null
+
+run_env "$plugin_dir/bin/omaflow-run" preflight-close >/dev/null
+rm "$closing_script"
+run_env "$plugin_dir/bin/omaflow" trigger preflight-close-event >/dev/null 2>&1
+run_env jq -e '."preflight-close".pendingUntil.type == "custom" and ."preflight-close".pendingUntil.data.name == "preflight-close-event"' \
+  "$state/armed.json" >/dev/null
+run_env jq -e '.kind == "until" and .ruleId == "preflight-close" and .status == "invalid"' \
+  <(grep '"kind":"until".*"ruleId":"preflight-close"' "$state/log.jsonl" | tail -1) >/dev/null
+cat >"$closing_script" <<'EOF'
+#!/bin/bash
+printf 'closing-script\n' >>"$TEST_CALLS"
+EOF
+chmod +x "$closing_script"
+: >"$calls"
+run_env "$plugin_dir/bin/omaflow-eval" retry-preflight-close >/dev/null
+grep -q '^closing-script$' "$calls"
+run_env jq -e 'has("preflight-close") | not' "$state/armed.json" >/dev/null
 
 : >"$calls"
 run_env "$plugin_dir/bin/omaflow-run" timeout-rule >/dev/null

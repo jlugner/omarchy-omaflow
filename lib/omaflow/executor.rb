@@ -46,12 +46,20 @@ module Omaflow
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
 
-    def self.run_until(rule_id, trigger:, trigger_data:, detail: nil)
+    def self.run_until(rule_id, trigger:, trigger_data:, armed:, &outcome)
+      code = 1
+      started = false
       locked = Store.with_lock('.run.lock') do
-        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :until,
-                                    detail:)
+        code = new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :until,
+                                    armed:) { started = true }
       end
-      locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
+      unless locked
+        outcome&.call('started' => false, 'status' => 'busy')
+        return fail_stderr('Another Omaflow run is holding the lock')
+      end
+
+      outcome&.call('started' => started, 'status' => code.zero? ? 'ok' : 'failed')
+      code
     end
 
     def self.revert(exec_id, &)
@@ -64,7 +72,7 @@ module Omaflow
       1
     end
 
-    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:, detail: nil)
+    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:, armed: nil)
       path = Paths.rule_file(rule_id)
       return self.class.fail_stderr('Invalid rule id') unless path
       return self.class.fail_stderr("No such rule: #{rule_id}") unless File.exist?(path)
@@ -77,14 +85,15 @@ module Omaflow
       @phase = phase
       @actions = phase == :until ? @rule.dig('until', 'actions') : @rule['actions']
       @log_kind = phase == :until ? 'until' : 'run'
-      @detail = detail
 
-      errors, = Validator.new(@rule).validate
+      errors, = Validator.new(@rule).validate(phase:)
       errors << "rule id '#{@rule['id']}' does not match its filename" unless @rule['id'] == rule_id
       return log_invalid(errors) unless errors.empty?
 
       return 0 if respect_cooldown && !cooldown_over?
 
+      yield if block_given?
+      @detail = revert_until(armed) if phase == :until
       snapshot = dry_run ? {} : capture_snapshot
       return 1 if snapshot.nil?
 
@@ -140,6 +149,15 @@ module Omaflow
     end
 
     private
+
+    def revert_until(armed)
+      return unless @rule.dig('until', 'revert') == true
+
+      outcome = nil
+      revert(armed.to_h['execId'].to_s) { outcome = it }
+      outcome ||= { 'status' => 'failed', 'detail' => 'revert outcome unavailable' }
+      ["revert: #{outcome['status']}", outcome['detail']].compact.join(' — ')
+    end
 
     def rule_name = @rule['name'].to_s
 

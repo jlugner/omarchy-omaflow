@@ -70,11 +70,13 @@ module Omaflow
       @warnings = []
     end
 
-    def validate
+    def validate(phase: :rule)
       check_top_level
-      check_trigger
-      check_conditions
-      check_actions
+      unless phase == :until
+        check_trigger
+        check_conditions
+        check_actions
+      end
       check_until
       [errors, warnings]
     end

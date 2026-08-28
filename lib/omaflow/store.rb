@@ -142,6 +142,17 @@ module Omaflow
       removed
     end
 
+    def defer_until(rule_id, event:)
+      mutate_armed do |rules|
+        armed = rules[rule_id]
+        next false unless armed.is_a?(Hash)
+
+        data = event['data'].is_a?(Hash) ? event['data'] : {}
+        armed['pendingUntil'] = { 'type' => event['type'].to_s, 'data' => data }
+        true
+      end
+    end
+
     def mutate_armed
       result = false
       locked = with_lock('.armed.lock') do

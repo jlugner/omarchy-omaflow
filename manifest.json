@@ -4,7 +4,7 @@
   "name": "Omaflow",
   "version": "0.4.0",
   "author": "Jesper Lugner",
-  "description": "Centralised desktop automation: docking, wifi, lid, schedules. Every rule is inspectable, testable, and reversible. Describe one in plain English and an agent drafts it. No AI at runtime.",
+  "description": "Centralised desktop automation for docking, wifi, lid, and schedules. Rules are inspectable and testable, with rollback for supported actions. An agent can draft rules; only explicit agent actions use AI when triggered.",
   "kinds": [
     "service",
     "overlay"

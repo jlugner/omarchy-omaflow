@@ -111,9 +111,10 @@ module Omaflow
 
     def install_menu
       if File.exist?(menu_file) || File.symlink?(menu_file)
-        text = Store.safe_read(menu_file)
+        target = editable_config_path(menu_file)
+        text = Store.safe_read(target)
         updated = replace_or_insert_menu(text)
-        write_atomic(menu_file, updated, mode: File.stat(menu_file).mode & 0o7777)
+        write_atomic(target, updated, mode: File.stat(target).mode & 0o7777)
       else
         FileUtils.mkdir_p(File.dirname(menu_file))
         write_atomic(menu_file, validate_menu("{\n#{MENU_BLOCK}\n}\n"), mode: 0o644)
@@ -126,6 +127,10 @@ module Omaflow
       updated = if replaced
                   replaced
                 else
+                  if parse_menu(text).key?('automations')
+                    raise SetupError, "#{menu_file} already has an unmarked automations entry; refusing to overwrite"
+                  end
+
                   closing = menu_closing_position(text)
                   raise SetupError, "#{menu_file} has no final closing brace; it needs manual attention" unless closing
 
@@ -149,9 +154,13 @@ module Omaflow
     end
 
     def validate_menu(text)
+      parse_menu(text)
+      text
+    end
+
+    def parse_menu(text)
       stripped = text.gsub(%r{^\s*//[^\n]*(\n|$)}, '').gsub(/,(\s*[}\]])/, '\1')
       JSON.parse(stripped)
-      text
     rescue JSON::ParserError
       raise SetupError, "#{menu_file} could not be parsed after setup; it needs manual attention"
     end
@@ -194,7 +203,8 @@ module Omaflow
         puts '   ! skipped: no Hyprland bindings.lua, bindings.conf, or hyprland.conf was found'
         return
       end
-      text = Store.safe_read(path)
+      target = editable_config_path(path)
+      text = Store.safe_read(target)
       block, begin_marker, end_marker = binding_format(path)
       updated = replace_marked(text, block:, begin_marker:, end_marker:, path:)
       separator = if text.empty?
@@ -205,7 +215,7 @@ module Omaflow
                     "\n\n"
                   end
       updated ||= "#{text}#{separator}#{block}\n"
-      write_atomic(path, updated, mode: File.stat(path).mode & 0o7777)
+      write_atomic(target, updated, mode: File.stat(target).mode & 0o7777)
       puts "   ✓ installed: #{path}"
     rescue JSON::ParserError
       puts '   ! skipped: hyprctl returned invalid binding data'
@@ -331,6 +341,20 @@ module Omaflow
       File.realpath(left) == File.realpath(right)
     rescue SystemCallError
       false
+    end
+
+    def editable_config_path(path)
+      return path unless File.symlink?(path)
+
+      target = File.realpath(path)
+      stat = File.stat(target)
+      unless stat.file? && stat.uid == Process.uid && File.writable?(target)
+        raise SetupError, "#{path} symlink target must be a writable regular file owned by the current user"
+      end
+
+      target
+    rescue SystemCallError => e
+      raise SetupError, "#{path} symlink target is unavailable: #{e.message}"
     end
 
     def cli_link = File.join(Dir.home, '.local', 'bin', 'omaflow')
