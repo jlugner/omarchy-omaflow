@@ -8,13 +8,15 @@ module Omaflow
       'lock-fingerprint-enable' => {
         'path' => File.join(ROOT, 'scripts', 'lock-fingerprint-enable'),
         'description' => 'Allow fingerprint authentication in a compatible Omarchy lock service',
-        'probe' => %w[omarchy-shell lock fingerprintControlAvailable],
+        'probe' => %w[omarchy-shell lock omaflowFingerprintControlVersion],
+        'probe_output' => '1',
         'source' => 'built-in'
       },
       'lock-fingerprint-disable' => {
         'path' => File.join(ROOT, 'scripts', 'lock-fingerprint-disable'),
         'description' => 'Stop fingerprint authentication in a compatible Omarchy lock service',
-        'probe' => %w[omarchy-shell lock fingerprintControlAvailable],
+        'probe' => %w[omarchy-shell lock omaflowFingerprintControlVersion],
+        'probe_output' => '1',
         'source' => 'built-in'
       }
     }.freeze
@@ -67,7 +69,7 @@ module Omaflow
 
       probe = value['probe']
       return value unless probe.is_a?(Array)
-      return value if probe_available?(probe)
+      return value if probe_available?(probe, value.fetch('probe_output', 'true'))
 
       nil
     end
@@ -97,12 +99,13 @@ module Omaflow
       stat.directory? && stat.mode.anybits?(0o1000)
     end
 
-    def probe_available?(probe)
+    def probe_available?(probe, expected_output)
       @probe_results ||= {}
-      return @probe_results[probe] if @probe_results.key?(probe)
+      key = [probe, expected_output]
+      return @probe_results[key] if @probe_results.key?(key)
 
       output, ok = Sys.capture(*probe)
-      @probe_results[probe] = ok && output.strip == 'true'
+      @probe_results[key] = ok && output.strip == expected_output
     end
 
     def description(value)

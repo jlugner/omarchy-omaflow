@@ -139,7 +139,7 @@ omaflow scripts list
 
 Omaflow stores the canonical absolute path in `~/.config/omaflow/scripts.json`. User-approved executables and their containing directories must be owned by you or root and not writable by a group/anyone. Omaflow validates the name and availability again before every run, then executes the file directly with a 30-second timeout. Put fixed arguments in a wrapper script rather than in a rule. Script actions are not revertible; whitelisting a script grants rules that exact capability.
 
-Two packaged scripts, `lock-fingerprint-enable` and `lock-fingerprint-disable`, control fingerprint authentication through the lock service's `setFingerprintEnabled` IPC method. They support lid rules without giving agent-authored JSON access to PAM or privileged files. Validation rejects these actions unless the compatible lock IPC is currently available.
+Two packaged scripts, `lock-fingerprint-enable` and `lock-fingerprint-disable`, control temporary fingerprint suppression through a compatible lock service's versioned IPC capability. They support a lid-close rule with a lid-open `until` action without giving agent-authored JSON access to PAM or privileged files. The lock remains responsible for physical lid reconciliation and recovery. Validation rejects these actions unless capability version 1 is currently available, and Omaflow never installs or modifies a lock plugin or PAM configuration.
 
 ## How it works
 

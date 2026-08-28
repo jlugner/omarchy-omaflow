@@ -23,7 +23,7 @@ make_fake() {
 make_fake hyprctl 'if [[ -n ${TEST_HYPRCTL_FAIL:-} ]]; then exit 1; fi; if [[ $1 == monitors ]]; then cat "$TEST_MONITORS"; elif [[ $1 == clients ]]; then cat "$TEST_CLIENTS"; fi'
 make_fake nmcli 'if [[ $1 == -t ]]; then cat "$TEST_WIFI"; fi'
 make_fake omarchy 'if [[ $1 == theme && $2 == current ]]; then echo old-theme; elif [[ $1 == theme && $2 == list ]]; then printf "old-theme\nwork-theme\nbroken-theme\n"; fi'
-make_fake omarchy-shell 'case "$2" in dndState) echo off ;; status) echo "{\"stayAwake\":false}" ;; fingerprintControlAvailable) echo true ;; *) echo ok ;; esac'
+make_fake omarchy-shell 'case "$2" in dndState) echo off ;; status) echo "{\"stayAwake\":false}" ;; omaflowFingerprintControlVersion) echo 1 ;; *) echo ok ;; esac'
 make_fake pactl 'if [[ $1 == get-default-sink ]]; then echo old-sink; elif [[ $* == *"list sinks"* ]]; then echo "[{\"name\":\"dock-sink\",\"description\":\"Dock Audio\"}]"; fi'
 make_fake omarchy-notification-send 'true'
 make_fake gtk-launch 'true'

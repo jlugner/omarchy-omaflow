@@ -14,9 +14,9 @@ mkdir -p "$fake_bin" "$test_root/config" "$test_root/state" "$test_root/tools"
 printf '#!/bin/bash\ntrue\n' >"$fake_bin/omarchy-notification-send"
 cat >"$fake_bin/omarchy-shell" <<'EOF'
 #!/bin/bash
-if [[ $* == "lock fingerprintControlAvailable" ]]; then
+if [[ $* == "lock omaflowFingerprintControlVersion" ]]; then
   [[ -z ${OMAFLOW_LOCK_INCOMPATIBLE:-} ]] || exit 1
-  echo true
+  echo "${OMAFLOW_LOCK_VERSION:-1}"
 else
   echo ok
 fi
@@ -144,6 +144,11 @@ run_env env OMAFLOW_LOCK_INCOMPATIBLE=1 /usr/bin/ruby -r "$plugin_dir/lib/omaflo
   abort "unavailable built-in leaked into inventory" if
     Omaflow::ScriptRegistry.inventory.any? { it["name"] == "lock-fingerprint-enable" }
 '
+if run_env env OMAFLOW_LOCK_VERSION=2 "$plugin_dir/bin/omaflow-validate" "$compat_rule" >"$test_root/version.out"; then
+  echo "unsupported fingerprint service version unexpectedly validated" >&2
+  exit 1
+fi
+grep -q 'requires a compatible service' "$test_root/version.out"
 
 group_plugin="$test_root/group-plugin"
 mkdir "$group_plugin"
