@@ -28,6 +28,17 @@ RuboCop (config in .rubocop.yml, enforced in CI), plus: endless methods for shor
 - `while` is an array of 1..5 reactions (`{"trigger", "actions"}`, requires `until`) that are live only while armed: their triggers join `Store.active_triggers`, so watched directories and repos follow the armed state. `fire_while_rules` runs after `fire_until_rules` for each event and in the interval pass, so a closing event wins over a reaction on the same tick; it skips rules with `pendingUntil`, never arms or disarms, and runs each matching reaction as executor phase `:while` with its index (`reaction:`; log kind `while`, trigger `while[<i>]:<type>`, no cooldown update). Interval reactions pace from `whileEpochs["<i>"]`, stamped on every attempt, falling back to `armedEpoch`.
 - `Store.parse_json`/`read_json` return the fallback unless the parse matches the fallback's type — never pass `nil` as the fallback expecting a parse back.
 
+## Preview image
+
+`preview.jpg` (2560×1440, the marketplace's source size) is rendered from `assets/preview.html` with the fonts on a stock Omarchy install (Adwaita Sans, JetBrainsMono Nerd Font):
+
+```bash
+chromium --headless=new --hide-scrollbars --force-device-scale-factor=1.28 --window-size=2000,1125 --screenshot=/tmp/preview.png "file://$PWD/assets/preview.html"
+magick /tmp/preview.png -quality 93 -strip preview.jpg
+```
+
+Edit the HTML, not the JPEG. The marketplace picks the image up only when a new commit is verified.
+
 ## Adding a trigger, condition, or action type
 
 Touch all of: `Vocabulary`, `Validator::{TRIGGER,CONDITION,ACTION}_CHECKS` (+ a check method), `Executor::HANDLERS` for actions (+ `SNAPSHOTTED` if revertible), `Evaluator` event derivation for triggers, `Author::SCHEMA_DOC`, and the README. `tests/test-docs.sh` pins these together — update its expected list, then add behavior tests.

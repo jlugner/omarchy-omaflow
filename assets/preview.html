@@ -1,0 +1,89 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+:root{--bg:#0c0c0f;--ink:#efe9df;--muted:#a49c90;--faint:#6b655c;--line:#2a2a30;--card:#15151a;
+--when:#7fb2ff;--if:#e6c15a;--do:#e08cf2;--while:#5fd6dc;--until:#f28c55;--accent:#f28c55}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:2000px;height:1125px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:"Adwaita Sans","Liberation Sans",sans-serif}
+body::before{content:"";position:absolute;inset:0;background:
+ radial-gradient(900px 620px at 8% 100%, rgba(242,140,85,.20), transparent 70%),
+ radial-gradient(700px 500px at 100% 0%, rgba(95,214,220,.10), transparent 70%)}
+.mono{font-family:"JetBrainsMono Nerd Font","JetBrainsMono NF","Adwaita Mono",monospace}
+.left{position:absolute;left:92px;top:78px;width:1030px}
+.eyebrow{color:var(--accent);letter-spacing:.32em;font-size:20px;font-weight:600}
+h1{margin-top:34px;font-size:78px;line-height:1.02;font-weight:800;letter-spacing:-.025em}
+h1 span{color:var(--muted)}
+.sub{margin-top:30px;font-size:23px;line-height:1.5;color:var(--muted);max-width:960px}
+.vocab{margin-top:42px;display:flex;flex-direction:column;gap:20px}
+.vrow{display:grid;grid-template-columns:150px 1fr;gap:0 18px;align-items:start}
+.vlab{font-size:13px;letter-spacing:.24em;font-weight:800;color:var(--c);padding-top:9px}
+.chips{display:flex;flex-wrap:wrap;gap:9px 8px}
+.chip{font-size:16.5px;line-height:1;padding:9px 12px;border-radius:9px;border:1px solid color-mix(in srgb,var(--c) 45%,transparent);background:color-mix(in srgb,var(--c) 10%,transparent);color:var(--ink);white-space:nowrap}
+.chip.hi{background:var(--c);color:#0c0c0f;font-weight:700;border-color:var(--c)}
+.rule{position:absolute;left:92px;right:1010px;top:1004px;height:1px;background:var(--line)}
+.foot{position:absolute;left:92px;top:1030px;font-size:20px;color:var(--faint)}
+.panel{position:absolute;right:56px;top:48px;width:760px;height:1029px;border-radius:22px;background:linear-gradient(180deg,#141418,#0f0f13);
+ border:2px solid var(--accent);box-shadow:0 0 0 10px rgba(242,140,85,.07),0 40px 90px rgba(0,0,0,.6);padding:32px 36px 28px;display:flex;flex-direction:column;gap:12px}
+.ph{display:flex;align-items:baseline;gap:14px;font-size:24px;font-weight:700}
+.ph small{font-weight:500;color:var(--muted);font-size:20px}
+.ph .cnt{margin-left:auto;font-size:17px;color:var(--faint)}
+.prompt{border:1.5px solid #3a3a42;background:#101014;border-radius:14px;padding:14px 18px;font-size:18.5px;line-height:1.45;color:var(--ink)}
+.prompt .cur{display:inline-block;width:2px;height:22px;background:var(--ink);vertical-align:-4px;margin-left:2px}
+.chain{display:flex;flex-direction:column}
+.conn{height:22px;position:relative}
+.conn::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--c,#3a3a42);transform:translateX(-50%)}
+.conn.lbl{height:38px}
+.conn.lbl span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--bg);padding:0 12px;font-size:13px;letter-spacing:.24em;color:var(--c);font-weight:700}
+.card{position:relative;background:var(--card);border:1.5px solid #2a2a31;border-radius:14px;padding:13px 18px 13px 24px;display:flex;flex-direction:column;gap:7px}
+.card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:4px;border-radius:2px;background:var(--c)}
+.row{display:flex;align-items:center;gap:12px}
+.badge{font-size:11.5px;letter-spacing:.2em;font-weight:800;padding:5px 8px;border-radius:7px;color:#0c0c0f;background:var(--c);min-width:58px;text-align:center}
+.type{font-size:19px;font-weight:600}
+.val{margin-left:auto;font-size:15px;color:var(--muted);border:1px solid #33333b;border-radius:8px;padding:4px 10px;white-space:nowrap}
+.cap{font-size:15px;color:var(--muted);line-height:1.4}
+.then{font-size:15.5px;color:var(--ink);display:flex;gap:10px;align-items:baseline;line-height:1.35}
+.then b{color:var(--c);font-weight:700;font-size:12.5px;letter-spacing:.18em;flex:none}
+.tog{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--muted)}
+.tog i{width:34px;height:19px;border-radius:10px;background:var(--c);position:relative;display:inline-block}
+.tog i::after{content:"";position:absolute;right:3px;top:3px;width:13px;height:13px;border-radius:50%;background:#0c0c0f}
+.pf{margin-top:auto;font-size:15px;color:var(--faint);display:flex;gap:26px}
+</style></head><body>
+<div class="left">
+  <div class="eyebrow mono">OMAFLOW  /  JLUGNER</div>
+  <h1>Describe it in English.<br>Read the rule.<br><span>Let it run.</span></h1>
+  <div class="sub mono">Apple Shortcuts for Omarchy, except you don't build the flows. Your agent drafts a small rule, you review it, and it runs without AI — unless a rule explicitly asks the agent to decide.</div>
+  <div class="vocab mono">
+    <div class="vrow" style="--c:var(--when)"><div class="vlab">WHEN</div><div class="chips">
+      <span class="chip">monitor plugged in</span><span class="chip">wifi joins</span><span class="chip">wifi drops</span><span class="chip">lid closes</span><span class="chip">on battery</span><span class="chip">app opens</span><span class="chip">app closes</span><span class="chip">file appears</span><span class="chip">git branch changes</span><span class="chip">at 08:30</span><span class="chip">every 20 min</span><span class="chip">custom event</span></div></div>
+    <div class="vrow" style="--c:var(--if)"><div class="vlab">ONLY IF</div><div class="chips">
+      <span class="chip">weekday</span><span class="chip">time window</span><span class="chip">on AC</span><span class="chip">lid open</span><span class="chip">monitor present</span><span class="chip">app running</span><span class="chip">on a branch</span><span class="chip">on this wifi</span></div></div>
+    <div class="vrow" style="--c:var(--do)"><div class="vlab">DO</div><div class="chips">
+      <span class="chip">theme</span><span class="chip">do not disturb</span><span class="chip">night light</span><span class="chip">stay awake</span><span class="chip">launch app</span><span class="chip">workspace</span><span class="chip">audio output</span><span class="chip">notify</span><span class="chip">webhook</span><span class="chip">allowed script</span><span class="chip">time tracking</span><span class="chip hi">ask your agent</span></div></div>
+    <div class="vrow" style="--c:var(--until)"><div class="vlab">LIFECYCLE</div><div class="chips">
+      <span class="chip">when → while → until</span><span class="chip">undo restores what changed</span><span class="chip">revise by describing the change</span><span class="chip">timeline of every firing</span></div></div>
+  </div>
+</div>
+<div class="rule"></div>
+<div class="foot mono">Agent-drafted rules, deterministic runtime, no shell action — right inside Omarchy.</div>
+
+<div class="panel">
+  <div class="ph">Omaflow <small>· 6 automations</small><span class="cnt mono">↵ Compile &nbsp; Shift+↵ Revise &nbsp; e Edit</span></div>
+  <div class="prompt mono">when I dock my ultrawide on weekday mornings: work theme, Slack on workspace 3, sound to the dock. While docked, mute notifications during Zoom and tidy the meeting windows. Put it all back when I undock.<span class="cur"></span></div>
+  <div class="chain">
+    <div class="conn lbl" style="--c:var(--when)"><span class="mono">WHEN</span></div>
+    <div class="card" style="--c:var(--when)"><div class="row"><span class="badge mono">WHEN</span><span class="type">monitor-connected</span><span class="val mono">Dell U3821</span></div><div class="cap mono">fires when a monitor matching “Dell U3821” is plugged in</div></div>
+    <div class="conn" style="--c:var(--if)"></div>
+    <div class="card" style="--c:var(--if)"><div class="row"><span class="badge mono">IF</span><span class="type">weekday</span><span class="val mono">mon – fri</span></div><div class="row"><span class="badge mono">IF</span><span class="type">time-between</span><span class="val mono">06:00 – 11:00</span></div></div>
+    <div class="conn" style="--c:var(--do)"></div>
+    <div class="card" style="--c:var(--do)">
+      <div class="row"><span class="badge mono">DO 1</span><span class="type">theme</span><span class="val mono">work</span></div>
+      <div class="row"><span class="badge mono">DO 2</span><span class="type">launch</span><span class="val mono">Slack → workspace 3</span></div>
+      <div class="row"><span class="badge mono">DO 3</span><span class="type">audio-output</span><span class="val mono">Dock Audio</span></div></div>
+    <div class="conn lbl" style="--c:var(--while)"><span class="mono">WHILE</span></div>
+    <div class="card" style="--c:var(--while)"><div class="row"><span class="badge mono">WHILE</span><span class="type">app-opened</span><span class="val mono">class: zoom</span></div>
+      <div class="then mono"><b>THEN</b><span>dnd → on</span></div>
+      <div class="then mono"><b>THEN</b><span>agent → “move the meeting windows to workspace 5” · can: move-window-to-workspace, focus-window</span></div></div>
+    <div class="conn lbl" style="--c:var(--until)"><span class="mono">UNTIL</span></div>
+    <div class="card" style="--c:var(--until)"><div class="row"><span class="badge mono">UNTIL</span><span class="type">monitor-disconnected</span><span class="val mono">Dell U3821</span></div><div class="tog mono"><i></i>restore what this rule changed — theme, dnd, audio go back to how they were</div></div>
+  </div>
+  <div class="pf mono"><span>↵ Install rule</span><span>Esc Discard</span><span style="margin-left:auto">compiled by codex · reviewed by you</span></div>
+</div>
+</body></html>
