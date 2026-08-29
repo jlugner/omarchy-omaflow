@@ -142,12 +142,15 @@ module Omaflow
       removed
     end
 
-    def touch_while(rule_id)
+    def while_reactions(rule) = rule['while'].is_a?(Array) ? rule['while'].grep(Hash) : []
+
+    def touch_while(rule_id, reaction)
       mutate_armed do |rules|
         armed = rules[rule_id]
         next false unless armed.is_a?(Hash)
 
-        armed['whileEpoch'] = Time.now.to_i
+        epochs = armed['whileEpochs'].is_a?(Hash) ? armed['whileEpochs'] : {}
+        armed['whileEpochs'] = epochs.merge(reaction.to_s => Time.now.to_i)
         true
       end
     end
@@ -218,12 +221,10 @@ module Omaflow
       triggers << rule['trigger'] if rule['enabled'] == true && rule['trigger'].is_a?(Hash)
       until_block = rule['until'].is_a?(Hash) ? rule['until'] : {}
       until_trigger = until_block['trigger']
-      while_trigger = rule['while'].is_a?(Hash) ? rule['while']['trigger'] : nil
-      if armed_rules.key?(rule['id'])
-        triggers << until_trigger if until_trigger.is_a?(Hash)
-        triggers << while_trigger if while_trigger.is_a?(Hash)
-      end
-      triggers
+      return triggers unless armed_rules.key?(rule['id'])
+
+      triggers << until_trigger if until_trigger.is_a?(Hash)
+      triggers + while_reactions(rule).filter_map { it['trigger'] if it['trigger'].is_a?(Hash) }
     end
 
     def safe_expand_path(path)

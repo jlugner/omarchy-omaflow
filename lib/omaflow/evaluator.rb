@@ -430,14 +430,17 @@ module Omaflow
         path = Paths.rule_file(rule_id)
         next unless path && File.exist?(path)
 
-        trigger = Store.load_json!(path, {}).dig('while', 'trigger')
-        next unless trigger.is_a?(Hash)
+        Store.while_reactions(Store.load_json!(path, {})).each_with_index do |reaction, index|
+          trigger = reaction['trigger']
+          next unless trigger.is_a?(Hash)
 
-        event = matching_while_event(trigger, armed, events, intervals:)
-        next unless event
+          event = matching_while_event(trigger, armed, index, events, intervals:)
+          next unless event
 
-        Store.touch_while(rule_id) if trigger['type'] == 'interval'
-        Executor.run_while(rule_id, trigger: "while:#{trigger['type']}", trigger_data: event['data'] || {})
+          Store.touch_while(rule_id, index) if trigger['type'] == 'interval'
+          Executor.run_while(rule_id, reaction: index, trigger: "while[#{index}]:#{trigger['type']}",
+                                      trigger_data: event['data'] || {})
+        end
       rescue JSON::ParserError, IOError
         next
       rescue StandardError => e
@@ -460,8 +463,9 @@ module Omaflow
       matching_lifecycle_event(trigger, events, intervals:, since: armed['armedEpoch'].to_i)
     end
 
-    def matching_while_event(trigger, armed, events, intervals:)
-      matching_lifecycle_event(trigger, events, intervals:, since: [armed['armedEpoch'].to_i, armed['whileEpoch'].to_i].max)
+    def matching_while_event(trigger, armed, index, events, intervals:)
+      last = armed['whileEpochs'].is_a?(Hash) ? armed['whileEpochs'][index.to_s].to_i : 0
+      matching_lifecycle_event(trigger, events, intervals:, since: [armed['armedEpoch'].to_i, last].max)
     end
 
     def matching_lifecycle_event(trigger, events, intervals:, since:)

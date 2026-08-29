@@ -104,7 +104,7 @@ grep -q 'Shift+↵ Revise' "$plugin_dir/Omaflow.qml"
 grep -q '`Shift+Return`' "$plugin_dir/README.md"
 grep -q 'omaflow revise <id> "<change>"' "$plugin_dir/README.md"
 grep -q '^### While' "$plugin_dir/README.md"
-grep -q 'editorWhileTrigger' "$plugin_dir/Omaflow.qml"
+grep -q 'editorWhileTriggers' "$plugin_dir/Omaflow.qml"
 grep -q 'label: "WHILE"' "$plugin_dir/Omaflow.qml"
 grep -q 'While (optional, requires until)' "$plugin_dir/lib/omaflow/author.rb"
 jq -e '.description | contains("only explicit agent actions use AI when triggered")' "$plugin_dir/manifest.json" >/dev/null

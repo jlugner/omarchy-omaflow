@@ -62,9 +62,10 @@ module Omaflow
       code
     end
 
-    def self.run_while(rule_id, trigger:, trigger_data:)
+    def self.run_while(rule_id, reaction:, trigger:, trigger_data:)
       locked = Store.with_lock('.run.lock') do
-        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :while)
+        return new.execute(rule_id, dry_run: false, trigger:, trigger_data:, respect_cooldown: false, phase: :while,
+                                    reaction:)
       end
       locked ? 0 : fail_stderr('Another Omaflow run is holding the lock')
     end
@@ -79,7 +80,7 @@ module Omaflow
       1
     end
 
-    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:, armed: nil)
+    def execute(rule_id, dry_run:, trigger:, trigger_data:, respect_cooldown:, phase:, armed: nil, reaction: nil)
       path = Paths.rule_file(rule_id)
       return self.class.fail_stderr('Invalid rule id') unless path
       return self.class.fail_stderr("No such rule: #{rule_id}") unless File.exist?(path)
@@ -90,7 +91,7 @@ module Omaflow
       @trigger_data = trigger_data.is_a?(Hash) ? trigger_data : {}
       @exec_id = "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(4)}"
       @phase = phase
-      @actions = phase == :rule ? @rule['actions'] : @rule.dig(phase.to_s, 'actions')
+      @actions = phase_actions(phase, reaction)
       @log_kind = phase == :rule ? 'run' : phase.to_s
 
       errors, = Validator.new(@rule).validate(phase:)
@@ -156,6 +157,14 @@ module Omaflow
     end
 
     private
+
+    def phase_actions(phase, reaction)
+      case phase
+      when :rule then @rule['actions']
+      when :until then @rule.dig('until', 'actions')
+      when :while then @rule['while'].is_a?(Array) ? @rule['while'].dig(reaction.to_i, 'actions') : nil
+      end
+    end
 
     def revert_until(armed)
       return unless @rule.dig('until', 'revert') == true
