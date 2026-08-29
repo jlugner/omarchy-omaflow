@@ -22,7 +22,9 @@ Install Omaflow from the Omarchy plugin manager:
 omarchy plugin add https://github.com/jlugner/omarchy-omaflow.git --enable
 ```
 
-Then run setup:
+That is the whole installation: the engine and the overlay start with the shell, and `~/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow` opens the inspector right away. A one-time notification points to the optional setup step.
+
+Optionally, run setup to add three conveniences — an `omaflow` link in `~/.local/bin`, an Automations entry in the Omarchy menu, and the `Super+Shift+U` hotkey. Each step asks before writing, and nothing else depends on them:
 
 ```bash
 ~/.config/omarchy/plugins/jesperlugner.omaflow/bin/omaflow setup
@@ -30,7 +32,7 @@ Then run setup:
 
 After the CLI link exists, the command is `omaflow setup`.
 
-To uninstall, delete the `omaflow` link in `~/.local/bin`, remove the omaflow marker blocks from `~/.config/omarchy/extensions/omarchy-menu.jsonc` and your Hyprland bindings file, then run `omarchy plugin remove jesperlugner.omaflow`. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
+To uninstall, run `omarchy plugin remove jesperlugner.omaflow`. If you ran setup, also delete the `omaflow` link in `~/.local/bin` and remove the omaflow marker blocks from `~/.config/omarchy/extensions/omarchy-menu.jsonc` and your Hyprland bindings file. Rules live in `~/.config/omaflow/`; delete that and `~/.local/state/omaflow/` for a full cleanup.
 
 ## Use
 
