@@ -57,7 +57,7 @@ module Omaflow
       return 0 if File.exist?(path)
 
       File.open(path, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600) { it.write('') }
-      Sys.notify('Omaflow', 'Running. Open the menu: Automations. Or run: omaflow setup')
+      Sys.notify('Omaflow', "Installed and running. For the Super+Shift+U hotkey and the Automations menu entry, run: #{setup_command}")
       0
     rescue Errno::EEXIST
       0
@@ -356,6 +356,8 @@ module Omaflow
     rescue SystemCallError => e
       raise SetupError, "#{path} symlink target is unavailable: #{e.message}"
     end
+
+    def setup_command = "#{PLUGIN_DIR.sub(%r{\A#{Regexp.escape(Dir.home)}(?=/)}, '~')}/bin/omaflow setup"
 
     def cli_link = File.join(Dir.home, '.local', 'bin', 'omaflow')
     def menu_file = File.join(Dir.home, '.config', 'omarchy', 'extensions', 'omarchy-menu.jsonc')

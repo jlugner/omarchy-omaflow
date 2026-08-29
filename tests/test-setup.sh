@@ -236,7 +236,7 @@ second_output=$(NOTIFY_LOG="$notify_log" run_cli "$first_run_home" first-run 2>&
 [[ -z $first_output ]]
 [[ -z $second_output ]]
 [[ $(wc -l <"$notify_log") == 1 ]]
-grep -Fq 'Omaflow Running. Open the menu: Automations. Or run: omaflow setup' "$notify_log"
+grep -Fq "Omaflow Installed and running. For the Super+Shift+U hotkey and the Automations menu entry, run: $plugin_dir/bin/omaflow setup" "$notify_log"
 [[ $(stat -c %a "$first_run_home/.local/state/omaflow/first_run_done") == 600 ]]
 
 echo 'test-setup: ok'
