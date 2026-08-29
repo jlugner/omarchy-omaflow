@@ -44,6 +44,32 @@ module Omaflow
 
     def detached(*argv) = Process.detach(Process.spawn('setsid', *argv, out: File::NULL, err: File::NULL))
 
+    def process_command(pid)
+      File.read("/proc/#{pid}/cmdline").split("\0").join(' ')
+    rescue SystemCallError, IOError
+      nil
+    end
+
+    def descendants(pid)
+      children = Hash.new { |hash, key| hash[key] = [] }
+      Dir.glob('/proc/[0-9]*/stat').each do |path|
+        fields = File.read(path).rpartition(')').last.split
+        children[fields[1].to_i] << File.basename(File.dirname(path)).to_i
+      rescue SystemCallError, IOError
+        next
+      end
+      found = []
+      queue = [pid]
+      until queue.empty?
+        current = queue.shift
+        children[current].each do |child|
+          found << child
+          queue << child
+        end
+      end
+      found
+    end
+
     def notify(*)
       tool = %w[omarchy-notification-send notify-send].find { which(it) }
       system(tool, *, out: File::NULL, err: File::NULL) if tool

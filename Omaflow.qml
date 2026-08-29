@@ -3108,7 +3108,7 @@ Item {
           Text {
             visible: root.compiling
             text: root.spinnerFrames[root.spinnerFrame] + (root.compiling && root.staging.replaces
-              ? "  revising “" + String(root.staging.replacesName || root.staging.replaces) + "”…" : "  compiling…")
+              ? "  revising “" + String(root.staging.replacesName || root.staging.replaces) + "”…" : "  compiling…") + "   Esc cancels"
             color: root.accentColor
             opacity: 0.9
             font.family: Style.font.menuFamily
@@ -3162,6 +3162,12 @@ Item {
               if (root.confirmDeleteId !== "") {
                 if (confirmDialog.handleKey(event))
                   event.accepted = true
+                return
+              }
+              if (root.compiling && event.key === Qt.Key_Escape) {
+                root.cli(["stage", "reject"])
+                root.staging = null
+                event.accepted = true
                 return
               }
               if (root.previewOpen) {

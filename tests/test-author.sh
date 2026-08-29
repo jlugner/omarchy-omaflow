@@ -28,7 +28,11 @@ for arg in "$@"; do
   [[ $prev == "--output-last-message" ]] && out=$arg
   prev=$arg
 done
-if [[ $* == *"You revise ONE existing"* ]]; then
+if [[ $* == *"take your time"* ]]; then
+  echo $$ >"$TEST_ROOT/slow-codex-pid"
+  sleep 60
+  exit 0
+elif [[ $* == *"You revise ONE existing"* ]]; then
   printf '%s\n' "$*" >"$TEST_ROOT/revise-prompt"
   answer='{"id":"renamed-by-agent","name":"Quiet mode","enabled":true,"trigger":{"type":"wifi-connected","match":{"known":false}},"actions":[{"type":"dnd","state":"on"},{"type":"nightlight","state":"off"},{"type":"notify","message":"New network - DND enabled"}],"cooldownSeconds":120}'
 elif (( count == 1 )); then
@@ -125,6 +129,35 @@ run_env "$plugin_dir/bin/omaflow" stage reject >/dev/null
 status=0
 run_env "$plugin_dir/bin/omaflow" revise quiet-mode >/dev/null 2>&1 || status=$?
 [[ $status == 2 ]]
+
+# Cancel: stage reject during a compile kills the author and its agent, and
+# the author never publishes a late result or an error afterwards.
+rm -f "$test_root/slow-codex-pid"
+run_env "$plugin_dir/bin/omaflow-author" "take your time" 2>/dev/null &
+author_job=$!
+for _ in $(seq 1 100); do
+  [[ -f $test_root/slow-codex-pid ]] && run_env jq -e '.status == "compiling" and (.pid | type == "number")' "$state/staging.json" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+run_env jq -e '.status == "compiling"' "$state/staging.json" >/dev/null
+slow_codex_pid=$(<"$test_root/slow-codex-pid")
+run_env "$plugin_dir/bin/omaflow" stage reject | grep -q 'Cancelled the running compile'
+[[ ! -f $state/staging.json ]]
+if wait "$author_job"; then
+  echo "cancelled author exited successfully" >&2
+  exit 1
+fi
+for _ in $(seq 1 50); do
+  kill -0 "$slow_codex_pid" 2>/dev/null || break
+  sleep 0.1
+done
+! kill -0 "$slow_codex_pid" 2>/dev/null
+sleep 0.3
+[[ ! -f $state/staging.json ]]
+
+# Reject with nothing compiling is still a plain discard.
+run_env "$plugin_dir/bin/omaflow-author" "when I join an unknown wifi, enable dnd" >/dev/null
+run_env "$plugin_dir/bin/omaflow" stage reject | grep -q 'Staged rule discarded'
 
 # Agent resolution: omaflow config beats the omarchy default.
 printf '#!/bin/bash\nif [[ $1 == -p ]]; then printf "%%s" "$2" >/dev/null; echo "{}"; fi\n' >"$fake_bin/grok"

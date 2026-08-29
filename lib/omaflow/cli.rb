@@ -148,13 +148,31 @@ module Omaflow
       when 'show' then puts JSON.pretty_generate(Store.read_json(Paths.staging_file, {}))
       when 'accept' then return stage_accept
       when 'reject'
-        Store.with_lock('.staging.lock', timeout: 10) { FileUtils.rm_f(Paths.staging_file) }
-        puts 'Staged rule discarded'
+        cancelled = false
+        Store.with_lock('.staging.lock', timeout: 10) do
+          cancelled = cancel_compile?(Store.read_json(Paths.staging_file, {}))
+          FileUtils.rm_f(Paths.staging_file)
+        end
+        puts(cancelled ? 'Cancelled the running compile' : 'Staged rule discarded')
       else
         warn 'Usage: omaflow stage <accept|reject|show>'
         return 2
       end
       0
+    end
+
+    def cancel_compile?(staged)
+      pid = staged['pid']
+      return false unless staged['status'] == 'compiling' && pid.is_a?(Integer) && pid.positive?
+      return false unless Sys.process_command(pid).to_s.include?('omaflow')
+
+      victims = [pid] + Sys.descendants(pid)
+      victims.each do |victim|
+        Process.kill('TERM', victim)
+      rescue Errno::ESRCH, Errno::EPERM
+        next
+      end
+      true
     end
 
     def stage_file(path)

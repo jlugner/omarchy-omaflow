@@ -51,7 +51,7 @@ Build rules by hand in the editor: `Ctrl+N` starts a new visual chain, while `e`
 | `e` | Edit the selected rule |
 | `Alt+Delete` | Delete (confirmed) |
 | `Up` / `Down` | Move the selection |
-| `Esc` | Discard preview / clear / close |
+| `Esc` | Cancel a running compile / discard preview / clear / close |
 
 The activity timeline answers "why did my theme just change?" Every firing logs which trigger matched and what ran.
 

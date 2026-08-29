@@ -85,6 +85,7 @@ module Omaflow
         return failure("No such rule: #{@revise_id}") unless @current
       end
 
+      Signal.trap('TERM') { exit 143 }
       write_staging(status: 'compiling')
       attempt_errors = nil
       2.times do
@@ -146,18 +147,32 @@ module Omaflow
     end
 
     def failure(message)
-      write_staging(status: 'error', error: message)
+      return 1 unless write_staging(status: 'error', error: message)
+
       Sys.notify('Omaflow', "Could not compile the automation: #{message}")
       warn message
       1
     end
 
     def write_staging(status:, rule: nil, warnings: [], error: nil)
-      staging = { 'status' => status, 'agent' => @agent.to_s, 'request' => @request, 'updatedAt' => Sys.now_iso }
+      staging = { 'status' => status, 'agent' => @agent.to_s, 'request' => @request, 'updatedAt' => Sys.now_iso,
+                  'pid' => Process.pid }
       staging.merge!('replaces' => @current['id'], 'previous' => @current) if @current
       staging.merge!('rule' => rule, 'warnings' => warnings) if rule
       staging['error'] = error if error
-      Store.with_lock('.staging.lock', timeout: 10) { Store.write_json(Paths.staging_file, staging) }
+      written = false
+      Store.with_lock('.staging.lock', timeout: 10) do
+        next if @claimed && !still_mine?
+
+        Store.write_json(Paths.staging_file, staging)
+        written = true
+      end
+      @claimed ||= written && status == 'compiling'
+      written
+    end
+
+    def still_mine?
+      File.exist?(Paths.staging_file) && Store.read_json(Paths.staging_file, {})['pid'] == Process.pid
     end
 
     def prompt(attempt_errors)
